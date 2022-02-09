@@ -1,0 +1,193 @@
+---
+title: "Panel comparison analysis"
+author: "Clalit Genomics"
+date: "06/02/2022"
+output: 
+  html_document:
+    theme: united
+    toc: true
+    toc_float: true
+---
+
+<style type="text/css">
+  body{
+  font-size: 14pt;
+}
+</style>
+
+```{r render_report,eval=F,echo=F}
+library(rmarkdown)
+output_dir <- "/media/SSD/Bioinformatics/Projects/gene_panel_generator_202108/gene_panel_generator_project/output/reports"
+render('/media/SSD/Bioinformatics/Projects/gene_panel_generator_202108/gene_panel_generator_project/src/prepare_gene_panel_data.Rmd', output_dir = output_dir,output_file = sprintf('gene_panel_prep_report.%s.html',Sys.Date()),quiet = F)
+```
+
+```{r setup, include=FALSE}
+project_dir<-'/media/SSD/Bioinformatics/Projects/gene_panel_generator_202108/panel_comparison_project/'
+knitr::opts_knit$set(root.dir='/media/SSD/Bioinformatics/Projects/gene_panel_generator_202108/panel_comparison_project/')
+knitr::opts_chunk$set(echo = F)
+library(ProjectTemplate)
+setwd(project_dir)
+load.project()
+
+analysis_name<-glue('panel_comparison_analysis_{Sys.Date()}')
+analysis_dir<-glue('output/{analysis_name}')
+if (!dir.exists(analysis_dir)){dir.create(analysis_dir)}
+```
+
+
+# Source statistics
+
+First, we compared the panel and gene content of each source. 
+Altogether, we reviewed `r length(unique(source_db$source))` panel sources: `r paste0(unique(source_db$source),collapse=', ')`
+
+
+```{r panel_stats,include=T,eval=T,message=F}
+source_stats<-get_source_stats(source_db)
+# Create a gt table based on preprocessed
+source_stats %>%
+  gt() %>%
+  tab_header(title = "Source comparison")%>%
+  fmt_number(columns = c(`Genes per panel`),suffixing = TRUE)
+
+plot_number_of_genes_per_panel_dist()
+
+gene_num_cat_table<-generate_gene_panel_cat_number_table(panels_list)
+gene_num_cat_table%>%
+  gt(rowname_col = 'source') %>%
+   tab_spanner(
+    label = "Number of genes per panel",
+    columns = c(2:8)
+  )
+
+```
+
+Distance between panels was calculated using the Jaccard method. 
+
+```{r binarize_and_calculate_distance,include=F,eval=T,cache=T}
+binary_panel_gene_table<-create_binary_gene_table(fixed_source_db)
+# filter out the hpo data
+binary_panel_gene_table_no_hpo<-binary_panel_gene_table%>%filter(!grepl('hpo',row.names(binary_panel_gene_table)))
+# generate distance matrix between all the panels
+dm<-generate_distance_matrix(binary_panel_gene_table_no_hpo)
+# convert dm to df
+dm_df<-convert_dm_to_df(dm)
+```
+
+# Expert panel - panels combination
+
+we will generate panel combinations for the expert panels (panelapp NHS and clingen) including only high condidence genes
+
+```{r expert_panels_generation}
+expert_panels_panelapp<-panels_list%>%
+  filter(source=='panelapp' & (high_conf_genes>1))
+
+# get the panelapp NHS approved panels
+panelapp_nhs_panels<-fixed_source_db%>%filter(panel_comment=='NHS panel')%>%pull(panel_name)%>%unique()
+expert_panels_panelapp<-expert_panels_panelapp%>%filter(panel_name %in% panelapp_nhs_panels)
+
+# now get the clingen panels
+expert_panels_clingen<-panels_list%>%
+  filter(source=='clingen' & (high_conf_genes>1))
+
+clingen_panelapp_panels<-c(expert_panels_clingen%>%pull(panel_joined_name),
+                           expert_panels_panelapp%>%pull(panel_joined_name))
+
+# now compare the two panels
+expert_panels_dm_df<-dm_df%>%filter(grepl('clingen',row))%>%filter(col %in% clingen_panelapp_panels)
+clingen_panels<-as.character(expert_panels_clingen%>%pull(panel_joined_name))
+clingen_vs_panelapp<-get_top_similar_panels_table(joined_panel_names = clingen_panels,
+                                                  source_db = fixed_source_db,
+                                                  dm_df = expert_panels_dm_df,
+                                                  number_of_top_panels = 5,
+                                                  same_source = F)
+write.table(file=glue('{analysis_dir}/clingen_vs_panelapp.csv'),clingen_vs_panelapp,sep='\t',row.names = F)
+```
+
+Panelapp is XXX 
+Our aim is to both demonstrate the extent of variability between expert-panel based and commercial gene panels.
+For this purpose we reviewed selected panels designed by panelapp, and compared them against other similar panels from all other sources. 
+
+```{r select_panels}
+panelapp_panels<-panels_list%>%filter(source=='panelapp')
+selected_panels<-c('Familial hypercholesterolaemia - targeted panel',
+                   'RASopathies',
+                   'Hypertrophic cardiomyopathy - teen and adult',
+                   'Hearing loss',
+                   'Autism')
+```
+
+```{r}
+
+# now for hypertrophic cardiomyopathy - get the most associated panels
+selected_panel_name<-find_panel_in_dm_df(dm_df,source='panelapp',panel_name='Hypertrophic cardio')
+# get similar panels
+similar_panels_df<-get_similar_panels_from_dm_df(dm_df,selected_panel_name,top_most_similar = 0.005,maximal_distance = 0.99)
+
+similar_panels_binary_gene_table<-subset_binary_gene_table(binary_panel_gene_table_no_hpo,similar_panels_df$col)
+plot_panel_gene_heatmap(similar_panels_binary_gene_table,sort_by_similarity_to_selected_panel = T)
+
+
+gbin_for_heatmap<-bin_for_heatmap%>%mutate(panel=row.names(bin_for_heatmap))%>%pivot_longer(-panel)%>%left_join(similar_panels_df,by=c('panel'='col'))
+p <- ggplot(gbin_for_heatmap, aes(forcats::fct_reorder(panel, value.y), name, fill= value.x)) + 
+  geom_tile()+coord_flip()+theme(axis.text.x = element_text(angle=90))
+p
+
+panels_to_plot<-as.character(unique(panelapp_hcm$col))
+panels_num<-match(panels_to_plot,row.names(test_bin_data))
+selected_bin_data<-test_bin_data[panels_num,]
+selected_dm<-generate_distance_matrix(selected_bin_data)
+plot_dm_as_dendogram(selected_dm,selected_panel)
+# generate heatmap !!!
+
+hcm_panels<-row.names(binary_panel_gene_table)[grepl('hypertroph',row.names(binary_panel_gene_table),ignore.case = T) & grepl('cardio',row.names(binary_panel_gene_table),ignore.case=T) & !(grepl('hpo',row.names(binary_panel_gene_table),ignore.case = T))]
+
+```
+
+```{r per-panel-variability}
+panelapp_panels<-panels_list%>%
+  filter(source=='panelapp' & (high_conf_genes+medium_conf_genes)>1)%>%
+  mutate(panel_joined_name=glue('{source}|{panel_id}|{panel_name}'))
+
+# get the panelapp NHS approved panels
+panelapp_nhs_panels<-fixed_source_db%>%filter(panel_comment=='NHS panel')%>%pull(panel_name)%>%unique()
+panelapp_panels<-panelapp_panels%>%filter(panel_name %in% panelapp_nhs_panels)
+
+# get the distance matrix between the different panelapp panels and all the rest
+panelapp_df<-dm_df%>%filter(row %in% panelapp_panels$panel_joined_name)%>%filter(!grepl('hpo',col))
+# summarize the top 5 most similar panels per panel 
+
+# find most similar panels from OTHER sources
+panelapp_top_similars<-panelapp_df%>%filter(!grepl('panelapp',col))%>%
+  group_by(row)%>%slice_min(n=6,order_by=value)
+panelapp_top_similars_summary<-panelapp_df%>%summarize(n=n(),skimr::skim_without_charts(value))
+
+panelapp_comparison_top_similar_panels<-NULL
+for (panelapp_panel in unique(panelapp_top_similars$row)){
+  message(glue('Analyzing {panelapp_panel}..'))
+  panel_genes<-fixed_source_db%>%filter(panel==panelapp_panel)%>%pull(gene_symbol)
+  panelapp_num_o_genes<-length(panel_genes)
+  most_similar_panels<-as.character(panelapp_top_similars%>%filter(row==panelapp_panel)%>%pull(col))
+  for (similar_panel in setdiff(most_similar_panels,panelapp_panel)){
+    similar_panel_genes<-fixed_source_db%>%filter(panel==similar_panel)%>%pull(gene_symbol)
+    similar_panel_num_o_genes<-length(similar_panel_genes)
+    common_genes<-sum(panel_genes %in% similar_panel_genes)
+    panelapp_genes_not_in_similar_panel<-panelapp_num_o_genes-common_genes
+    distance<-panelapp_top_similars%>%filter(row==panelapp_panel &col==similar_panel)%>%pull(value)
+    panelapp_comparison_top_similar_panels<-panelapp_comparison_top_similar_panels%>%
+      bind_rows(data.frame(panelapp_panel,
+                           similar_panel,
+                           panelapp_num_o_genes,
+                           similar_panel_num_o_genes,
+                           common_genes,
+                           panelapp_genes_not_in_similar_panel,
+                           distance))
+  }
+}
+
+panelapp_comparison_top_similar_panels<-panelapp_comparison_top_similar_panels%>%
+  separate(similar_panel,sep='\\|',into = c('similar_source','similar_id','similar_name'))
+
+# check the top matching for each panel
+panelapp_comparison_top_similar_panels%>%group_by(panelapp_panel)%>%slice_min(distance,n=1)
+
+```
