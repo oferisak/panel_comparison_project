@@ -136,7 +136,9 @@ get_top_similar_panels_table<-function(joined_panel_names,
     top_similars_per_selected<-top_similars_per_selected%>%rowwise()%>%filter(!grepl(source,col))
   }  
   
-  top_similars_per_selected<-top_similars_per_selected%>%group_by(row)%>%slice_min(n=number_of_top_panels,order_by=value)%>%filter(value!=1)
+  top_similars_per_selected<-top_similars_per_selected%>%group_by(row)%>%
+    slice_min(n=number_of_top_panels,order_by=value)%>%
+    filter(value!=1)
   
   comparison_table<-NULL
   for (selected_panel_name in joined_panel_names){

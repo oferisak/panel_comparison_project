@@ -15,6 +15,10 @@ output:
 }
 </style>
 
+# TODO
+- summarize the number of overlapping genes with the expert panels
+- generate an automatic panel generator that takes in a few initial panels and returns a panel based on them
+
 ```{r render_report,eval=F,echo=F}
 library(rmarkdown)
 output_dir <- "/media/SSD/Bioinformatics/Projects/gene_panel_generator_202108/gene_panel_generator_project/output/reports"
@@ -77,7 +81,7 @@ dm_df<-convert_dm_to_df(dm)
 
 we will generate panel combinations for the expert panels (panelapp NHS and clingen) including only high condidence genes
 
-```{r expert_panels_generation}
+```{r prepare_expert_panels}
 expert_panels_panelapp<-panels_list%>%
   filter(source=='panelapp' & (high_conf_genes>1))
 
@@ -92,6 +96,10 @@ expert_panels_clingen<-panels_list%>%
 clingen_panelapp_panels<-c(expert_panels_clingen%>%pull(panel_joined_name),
                            expert_panels_panelapp%>%pull(panel_joined_name))
 
+```
+
+```{r find_similar_clingen_panelapp_panels}
+
 # now compare the two panels
 expert_panels_dm_df<-dm_df%>%filter(grepl('clingen',row))%>%filter(col %in% clingen_panelapp_panels)
 clingen_panels<-as.character(expert_panels_clingen%>%pull(panel_joined_name))
@@ -101,6 +109,106 @@ clingen_vs_panelapp<-get_top_similar_panels_table(joined_panel_names = clingen_p
                                                   number_of_top_panels = 5,
                                                   same_source = F)
 write.table(file=glue('{analysis_dir}/clingen_vs_panelapp.csv'),clingen_vs_panelapp,sep='\t',row.names = F)
+```
+
+once the corresponding clingen / panelapp panels were found join them and collect only the high confidence genes
+
+```{r generate_expert_panels}
+clingen_vs_panelapp<-readr::read_delim('./data/accessory_files/clingen_vs_panelapp_manual_match.csv')
+# use the NHS approved panelapp panels as reference and add the clingen high confidence genes 
+expert_panels_list<-expert_panels_panelapp%>%mutate(source='expert_panels')
+expert_panels_source<-fixed_source_db%>%
+  mutate(source='expert_panel')%>%
+  filter(panel_joined_name%in%expert_panels_list$panel_joined_name)%>% # take only the NHS panels
+  filter(confidence_level==3) # take only the high confidence genes
+
+# now add the matching clingen panel genes
+for (clingen_panel_name in clingen_vs_panelapp$selected_panel_name){
+  clingen_panel_source<-fixed_source_db%>%filter(panel_joined_name==clingen_panel_name)
+  matching_panelapp_panel_joined_name<-clingen_vs_panelapp%>%filter(selected_panel_name==clingen_panel_name)%>%pull(similar_panel)
+  matching_panelapp_panel<-expert_panels_source%>%filter(panel_joined_name==matching_panelapp_panel_joined_name)
+  # now get the clingen genes that are not in the panelapp  panel
+  clingen_genes_to_add<-clingen_panel_source%>%
+    filter(confidence_level==3)%>%
+    filter(!(gene_symbol %in% (matching_panelapp_panel%>%pull(gene_symbol))))
+  message(glue('Will add {nrow(clingen_genes_to_add)} genes from {clingen_panel_name} to {matching_panelapp_panel_joined_name}'))
+  expert_panels_source<-expert_panels_source%>%bind_rows(clingen_genes_to_add%>%mutate(source='expert_panels',
+                                                                panel_joined_name=matching_panelapp_panel_joined_name,
+                                                                panel_id=unique(matching_panelapp_panel%>%pull(panel_id)),
+                                                                panel_name=unique(matching_panelapp_panel%>%pull(panel_name))))
+}
+
+# now add all the clingen panels without a similar panelapp panel
+remaining_clingen_panels<-fixed_source_db%>%filter(source=='clingen')%>%
+  filter(!(panel_joined_name%in%clingen_vs_panelapp$selected_panel_name))%>%
+  filter(!(panel_name %in% c('General Gene Curation','UNC Biocuration Core','Syndromic Disorders','PTEN')))%>%
+  filter(!(panel_name %in% (panels_list%>%filter(source=='clingen' & high_conf_genes==1)%>%pull(panel_name))))
+
+expert_panels_source<-expert_panels_source%>%bind_rows(remaining_clingen_panels)
+  
+# now fix the source table 
+joined_panel_names<-split_joined_panel_name(expert_panels_source$panel_joined_name)
+joined_panel_names<-joined_panel_names%>%mutate(source='expert_panel',
+                                                panel_joined_name=glue('{source}|{panel_id}|{panel_name}'))
+
+expert_panels_source$source<-joined_panel_names$source
+expert_panels_source$panel_joined_name<-joined_panel_names$panel_joined_name
+
+```
+
+```{r compare_expert_panels_against_the_rest}
+expert_and_other_source<-expert_panels_source%>%
+  bind_rows(fixed_source_db%>%filter(!(source %in% c('hpo','clingen','panelapp'))))
+
+binary_expert_table<-create_binary_gene_table(expert_and_other_source)
+# generate distance matrix between all the panels
+expert_dm<-generate_distance_matrix(binary_expert_table)
+# convert dm to df
+expert_dm_df<-convert_dm_to_df(expert_dm)
+
+
+expert_panels_similars_summary<-expert_panel_top_similars%>%summarize(n=n(),skimr::skim_without_charts(value))
+
+expert_panels_comparison_top_similar_panels<-get_top_similar_panels_table(expert_panels_similars_summary$row,
+                                                                          source_db = expert_and_other_source,
+                                                                          dm_df = expert_dm_df,
+                                                                          number_of_top_panels = 5,
+                                                                          same_source = F)
+
+expert_panels_comparison_top_similar_panels<-expert_panels_comparison_top_similar_panels%>%
+  separate(similar_panel,sep='\\|',into = c('similar_source','similar_id','similar_name'))
+
+expert_panels_colsest_panels<-expert_panels_comparison_top_similar_panels%>%group_by(selected_panel_name)%>%slice_min(n=1,order_by = distance)%>%ungroup()
+
+# A table that summarizes the overlap between the expert panel genes and the similar panels
+expert_panels_summary<-expert_panels_colsest_panels%>%
+  mutate(percent_genes_overlap=common_genes/selected_num_o_genes)%>%select(selected_panel_name,selected_num_o_genes,percent_genes_overlap)
+
+g<-ggplot(expert_panels_summary,aes(x=selected_num_o_genes,y=percent_genes_overlap))+
+  geom_point()+
+  geom_smooth(col='red',method='gam')+ 
+  scale_x_log10()+
+  theme_minimal()
+g
+
+# A table that summarizes per panle source how good it overlapped with the expert panels
+closest_panels_summary<-expert_panels_colsest_panels%>%
+  group_by(similar_source)%>%summarize(n=n(),skimr::skim_without_charts(distance))%>%
+  left_join(panels_list%>%filter(number_of_genes>1)%>%group_by(source)%>%summarize(total_number_of_panels=n()),by=c('similar_source'='source'))%>%
+  mutate(closest_panels_to_total_ratio=n/total_number_of_panels)
+
+# Plot the distance of the similar panels as a function of the number of genes in the expert panel
+g<-ggplot(expert_panels_comparison_top_similar_panels%>%group_by(selected_panel_name)%>%slice_min(n=3,order_by = distance),aes(x=selected_num_o_genes,y=distance,col=similar_source))+
+  geom_point(alpha=0.5)+
+  geom_smooth(se=F)+
+  scale_x_log10()+
+  theme_minimal()+
+  theme(legend.position = 'top')+
+  labs(x='Number of genes in expert panel',y='Distance from expert panel',col=NULL)+
+  scale_color_nejm()
+g
+
+
 ```
 
 Panelapp is XXX 
@@ -143,51 +251,4 @@ hcm_panels<-row.names(binary_panel_gene_table)[grepl('hypertroph',row.names(bina
 
 ```
 
-```{r per-panel-variability}
-panelapp_panels<-panels_list%>%
-  filter(source=='panelapp' & (high_conf_genes+medium_conf_genes)>1)%>%
-  mutate(panel_joined_name=glue('{source}|{panel_id}|{panel_name}'))
 
-# get the panelapp NHS approved panels
-panelapp_nhs_panels<-fixed_source_db%>%filter(panel_comment=='NHS panel')%>%pull(panel_name)%>%unique()
-panelapp_panels<-panelapp_panels%>%filter(panel_name %in% panelapp_nhs_panels)
-
-# get the distance matrix between the different panelapp panels and all the rest
-panelapp_df<-dm_df%>%filter(row %in% panelapp_panels$panel_joined_name)%>%filter(!grepl('hpo',col))
-# summarize the top 5 most similar panels per panel 
-
-# find most similar panels from OTHER sources
-panelapp_top_similars<-panelapp_df%>%filter(!grepl('panelapp',col))%>%
-  group_by(row)%>%slice_min(n=6,order_by=value)
-panelapp_top_similars_summary<-panelapp_df%>%summarize(n=n(),skimr::skim_without_charts(value))
-
-panelapp_comparison_top_similar_panels<-NULL
-for (panelapp_panel in unique(panelapp_top_similars$row)){
-  message(glue('Analyzing {panelapp_panel}..'))
-  panel_genes<-fixed_source_db%>%filter(panel==panelapp_panel)%>%pull(gene_symbol)
-  panelapp_num_o_genes<-length(panel_genes)
-  most_similar_panels<-as.character(panelapp_top_similars%>%filter(row==panelapp_panel)%>%pull(col))
-  for (similar_panel in setdiff(most_similar_panels,panelapp_panel)){
-    similar_panel_genes<-fixed_source_db%>%filter(panel==similar_panel)%>%pull(gene_symbol)
-    similar_panel_num_o_genes<-length(similar_panel_genes)
-    common_genes<-sum(panel_genes %in% similar_panel_genes)
-    panelapp_genes_not_in_similar_panel<-panelapp_num_o_genes-common_genes
-    distance<-panelapp_top_similars%>%filter(row==panelapp_panel &col==similar_panel)%>%pull(value)
-    panelapp_comparison_top_similar_panels<-panelapp_comparison_top_similar_panels%>%
-      bind_rows(data.frame(panelapp_panel,
-                           similar_panel,
-                           panelapp_num_o_genes,
-                           similar_panel_num_o_genes,
-                           common_genes,
-                           panelapp_genes_not_in_similar_panel,
-                           distance))
-  }
-}
-
-panelapp_comparison_top_similar_panels<-panelapp_comparison_top_similar_panels%>%
-  separate(similar_panel,sep='\\|',into = c('similar_source','similar_id','similar_name'))
-
-# check the top matching for each panel
-panelapp_comparison_top_similar_panels%>%group_by(panelapp_panel)%>%slice_min(distance,n=1)
-
-```
