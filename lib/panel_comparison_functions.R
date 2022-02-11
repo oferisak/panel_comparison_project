@@ -99,7 +99,7 @@ find_panel_in_dm_df<-function(dm_df,source,panel_id=NA,panel_name=NA){
 # if the distance is based on jaccard, then a value of 0.95 means that the panels are only 5% similar 
 # this function gets the top X% most similar panels, with a maximal distance of Y
 get_similar_panels_from_dm_df_by_prop<-function(dm_df,selected_panel_name,top_most_similar=0.05,maximal_distance=0.99){
-  similar_panels_df<-dm_df%>%filter(row==selected_panel_name)%>%slice_min(prop = top_most_similar,order_by = value)%>%filter(value<maximal_distance)
+  similar_panels_df<-dm_df%>%filter(row%in%selected_panel_name)%>%slice_min(prop = top_most_similar,order_by = value)%>%filter(value<maximal_distance)
   return(similar_panels_df)
 }
 
@@ -164,4 +164,12 @@ get_top_similar_panels_table<-function(joined_panel_names,
     }
   }
   return(comparison_table)
+}
+
+get_panel_comparison_metrics<-function(panelA_genes,panelB_genes){
+  common_genes<-sum(panelA_genes %in% panelB_genes)
+  A_not_in_B<-length(panelA_genes)-common_genes
+  B_not_in_A<-length(panelB_genes)-common_genes
+  panel_comp_table<-data.frame(common_genes,A_not_in_B,B_not_in_A)
+  return(panel_comp_table)
 }

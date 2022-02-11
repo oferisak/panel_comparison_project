@@ -251,4 +251,68 @@ hcm_panels<-row.names(binary_panel_gene_table)[grepl('hypertroph',row.names(bina
 
 ```
 
+```{r auto_generate_panel}
 
+dm_with_hpo<-generate_distance_matrix(binary_panel_gene_table%>%filter(row.names(binary_panel_gene_table) %in% (panels_list%>%filter(number_of_genes>1)%>%pull(panel_joined_name))))
+# convert dm to df
+dm_df_with_hpo<-convert_dm_to_df(dm)
+
+joined_panel_names<-c('invitae|02261|Invitae Hypertrophic Cardiomyopathy Panel','health_in_code|1_1|Hypertrophic Cardiomyopathy – Basic Panel',"blueprint|1_16|Hypertrophic Cardiomyopathy (HCM) Panel",'cegat|3_2|Cardiomyopathy, hypertrophic','health_in_code|1_2|Hypertrophic Cardiomyopathy – Extended Panel')
+gen_source_db<-fixed_source_db%>%filter(!grepl('clingen|panelapp|hpo',source))
+gen_dm_df<-dm_df%>%filter(!grepl('clingen|panelapp',row))%>%filter(!grepl('clingen|panelapp|hpo',col))
+
+comp_panel<-expert_panels_source%>%filter(grepl('Hypertrophic',panel_joined_name))
+#comp_panel<-fixed_source_db%>%filter(grepl('panelapp',source))%>%filter(grepl('Hypertrophic',panel_joined_name))
+
+
+gene_rank<-generate_panel_from_panels(joined_panel_names = joined_panel_names,gen_source_db = gen_source_db,gen_dm_df = gen_dm_df,max_distance = 0.85)
+
+dist_by_thresh<-NULL
+for (thresh in seq(0,1,0.001)){
+  genes_above_thresh<-gene_rank%>%filter(rank_percentile>=thresh)%>%pull(gene_symbol)
+  dist<-calculate_panel_similarity_as_df(genes_above_thresh,comp_panel%>%pull(gene_symbol))
+  dist_by_thresh<-dist_by_thresh%>%bind_rows(data.frame(thresh,num_o_genes=length(genes_above_thresh),dist))
+}
+dist_by_thresh<-dist_by_thresh%>%mutate(sensitivity=common_genes/comparison_panel_genes,
+                                          ppv=common_genes/selected_panel_genes)
+
+
+g<-ggplot(dist_by_thresh%>%group_by(sensitivity)%>%slice_max(order_by = ppv,n=1),aes(x=sensitivity,y=ppv))+
+  geom_line()+
+  ylim(c(0,1))+xlim(c(0,1))+
+  theme_minimal()
+g
+
+comp_panel<-comp_panel%>%left_join(gene_rank)
+
+
+g<-ggplot(dist_by_thresh,aes(x=thresh,y=similarity))+
+  geom_point()+
+  theme_minimal()
+g
+
+
+joined_panel_names<-c("health_in_code|3_64|Movement disorders comprehensive panel" ,"pronto|86|Movement Disorders")
+comp_panel<-expert_panels_source%>%filter(panel_joined_name=='expert_panel|540|Adult onset movement disorder')
+
+gene_rank<-generate_panel_from_panels(joined_panel_names = joined_panel_names,gen_source_db = gen_source_db,gen_dm_df = gen_dm_df,max_distance = 0.9)
+
+comp_panel<-comp_panel%>%left_join(gene_rank)
+
+dist_by_thresh<-NULL
+for (thresh in seq(0,1,0.001)){
+  genes_above_thresh<-gene_rank%>%filter(rank_percentile>=thresh)%>%pull(gene_symbol)
+  dist<-calculate_panel_similarity_as_df(genes_above_thresh,comp_panel%>%pull(gene_symbol))
+  dist_by_thresh<-dist_by_thresh%>%bind_rows(data.frame(thresh,num_o_genes=length(genes_above_thresh),dist))
+}
+dist_by_thresh<-dist_by_thresh%>%mutate(sensitivity=common_genes/comparison_panel_genes,
+                                          ppv=common_genes/selected_panel_genes)
+
+
+g<-ggplot(dist_by_thresh%>%group_by(sensitivity)%>%slice_max(order_by = ppv,n=1),aes(x=sensitivity,y=ppv))+
+  geom_line()+
+  ylim(c(0,1))+xlim(c(0,1))+
+  theme_minimal()
+g
+
+```
