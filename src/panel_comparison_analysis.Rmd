@@ -38,7 +38,6 @@ analysis_dir<-glue('output/{analysis_name}')
 if (!dir.exists(analysis_dir)){dir.create(analysis_dir)}
 ```
 
-
 # Source statistics
 
 First, we compared the panel and gene content of each source. 
