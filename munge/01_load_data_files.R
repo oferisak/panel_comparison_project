@@ -49,5 +49,15 @@ gtr_db<-readr::read_delim(gtr_db_file)
 gtr_db<-gtr_db%>%mutate(panel_joined_name=glue('{source}|{panel_id}|{panel_name}'))
 gtr_panels_list_file<-'./data/databases/gtr/gtr_panels_list_2022-02-13.csv.gz'
 gtr_panels_list<-readr::read_delim(gtr_panels_list_file)
+# remove panels not in gtr_db
+gtr_panels_list<-gtr_panels_list%>%filter(name_of_laboratory%in%unique(gtr_db$source) & lab_test_name%in%unique(gtr_db$panel_name))
+  
+gtr_panels_list <-gtr_panels_list %>% 
+  mutate(number_of_genes_cat = cut(
+    number_of_genes,
+    breaks =
+      c(0, 1, 10, 50, 200, 500, 1000, 100000),
+    labels = c('1', '2-10', '11-50', '51-200', '201-500', '501-1000', '>1000')
+  ))
 
 panels_list<-get_panels_list_from_source_db(source_db)

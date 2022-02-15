@@ -33,3 +33,12 @@ generate_gene_panel_cat_number_table<-function(panels_list){
     ungroup()
   return(gene_num_cat_table)
 }
+
+generate_gtr_gene_panel_cat_number_table<-function(gtr_panels_list){
+  gene_num_cat_table<-gtr_panels_list%>%group_by(name_of_laboratory)%>%
+    count(number_of_genes_cat)%>%
+    arrange(number_of_genes_cat)%>%
+    pivot_wider(names_from = number_of_genes_cat,values_from = n,values_fill = 0)%>%
+    ungroup()
+  return(gene_num_cat_table)
+}
