@@ -73,8 +73,6 @@ dm<-generate_distance_matrix(binary_panel_gene_table_no_hpo)
 dm_df<-convert_dm_to_df(dm)
 ```
 
-
-
 # Expert panel - panels combination
 
 we will generate panel combinations for the expert panels (panelapp NHS and clingen) including only high condidence genes
@@ -160,7 +158,7 @@ gtr_with_expert_db<-gtr_db%>%mutate(panel_id=as.character(panel_id))%>%
   bind_rows(fixed_source_db%>%filter(source%in%c('panelapp','clingen')))%>%
   bind_rows(expert_panels_source)
 
-gtr_binary_panel_gene_table<-create_binary_gene_table(gtr_with_panelapp_db)
+gtr_binary_panel_gene_table<-create_binary_gene_table(gtr_with_expert_db)
 # filter out the hpo data
 #binary_panel_gene_table_no_hpo<-binary_panel_gene_table%>%filter(!grepl('hpo',row.names(binary_panel_gene_table)))
 # generate distance matrix between all the panels
@@ -281,8 +279,8 @@ comp_panel<-fixed_source_db%>%filter(grepl('panelapp',source))%>%filter(grepl('H
 comp_panel<-readr::read_csv('./data/accessory_files/hypertrophic_cardiomyopathy_basic.csv',col_names = 'gene_symbol')
 comp_panel<-readr::read_csv('./data/accessory_files/hypertrophic_cardiomyopathy_extended.csv',col_names = 'gene_symbol')%>%mutate(gene_symbol=stringr::str_replace(gene_symbol,'\\*',''))
 
-gen_source_db<-gtr_db
-gen_dm_df<-gtr_dm_df%>%filter(!grepl('panelapp|clingen|expert',row))%>%filter(!grepl('panelapp|clingen|expert',col))
+gen_source_db<-gtr_db%>%mutate(panel_id=as.character(panel_id))%>%bind_rows(expert_panels_source)
+gen_dm_df<-gtr_dm_df%>%filter(!grepl('panelapp|clingen|expert',col))
 
 gene_rank<-generate_panel_from_panels(joined_panel_names = joined_panel_names,gen_source_db,gen_dm_df,max_distance = 0.9,with_mitochondrial = T)
 
