@@ -4,18 +4,24 @@ generate_panel_from_panels<-function(joined_panel_names,gen_source_db,gen_dm_df,
   
   # first tier similar panels
   #similar_panels_df<-get_similar_panels_from_dm_df_by_prop(gen_dm_df,joined_panel_names,top_most_similar = 0.1,maximal_distance = 0.99)
-  
-  similar_panels_df<-gen_dm_df%>%filter(row %in% joined_panel_names)%>%filter(value<max_distance)%>%
+
+
+  similar_panels_df<-gen_dm_df%>%filter(row %in% joined_panel_names)%>%filter(value<=max_distance)%>%
     group_by(col)%>%summarize(dist=min(value))#take the panel with the smallest distance to one of the given panels
-  
+  similar_panels_df<-similar_panels_df%>%left_join(
+    gtr_panels_list%>%
+      select(panel_joined_name,condition_identifiers),
+    by=c('col'='panel_joined_name'))
   
   message('collect all similar panels and add their genes..')
   gene_rank<-gen_source_db%>%mutate(panel_joined_name=as.character(panel_joined_name))%>%
     filter(panel_joined_name%in%similar_panels_df$col)%>%select(panel_joined_name,gene_symbol)%>%
-    left_join(similar_panels_df%>%select(col,dist)%>%rename('panel_joined_name'=col))%>%
+    left_join(similar_panels_df%>%select(col,dist,condition_identifiers)%>%rename('panel_joined_name'=col))%>%
     mutate(gene_score=1-dist)%>%
     group_by(gene_symbol)%>%
     summarize(num_o_panels =n(), 
+              #closest_dist=min(gene_score),
+              #closest_panel=panel_joined_name[which(gene_score==closest_dist)][1],
               gene_score=sum(gene_score))%>%
     mutate(rank=rank(gene_score,tie='max'))
   

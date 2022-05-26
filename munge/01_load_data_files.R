@@ -17,16 +17,19 @@ load_source_dbs <- function() {
 }  
 
 source_db<-load_source_dbs()
+source_db<-fix_gene_names(source_db)
 # fix the source file
-cache("fixed_source_db", {
+#cache("fixed_source_db", {
   # remove red genes from panelapp  
-  fixed_source_db<-remove_red_genes_from_panelapp(source_db)
+  #fixed_source_db<-remove_red_genes_from_panelapp(source_db)
   # remove disputed genes from clingen
-  fixed_source_db<-remove_disputed_genes_from_clingen(fixed_source_db)
+  #fixed_source_db<-remove_disputed_genes_from_clingen(fixed_source_db)
   # fix "bad" genes
-  fixed_source_db<-fix_source_db(fixed_source_db)
-  fixed_source_db
-})
+  fixed_source_db<-fix_source_db(source_db)
+#   fixed_source_db
+# })
+
+#fixed_source_db<-fix_gene_names(fixed_source_db)
 
 # summarize the source_db data into panels
 get_panels_list_from_source_db <- function(source_db) {
@@ -44,13 +47,17 @@ get_panels_list_from_source_db <- function(source_db) {
   return(panels_list)
 }
 
-gtr_db_file<-'./data/databases/gtr/gtr_panels_db_2022-02-13.csv.gz'
+# Load the GTR database
+gtr_db_file<-'./data/databases/gtr/gtr_panels_db_2022-02-20.csv.gz'
 gtr_db<-readr::read_delim(gtr_db_file)
-gtr_db<-gtr_db%>%mutate(panel_joined_name=glue('{source}|{panel_id}|{panel_name}'))
-gtr_panels_list_file<-'./data/databases/gtr/gtr_panels_list_2022-02-13.csv.gz'
-gtr_panels_list<-readr::read_delim(gtr_panels_list_file)
+# fix the gene names to be standard
+gtr_db<-fix_gene_names(gtr_db)
+
+gtr_panels_list_file<-'./data/databases/gtr/gtr_panels_list_2022-02-20.csv.gz'
+gtr_panels_list<-readr::read_delim(gtr_panels_list_file,quote = '"')
+
 # remove panels not in gtr_db
-gtr_panels_list<-gtr_panels_list%>%filter(name_of_laboratory%in%unique(gtr_db$source) & lab_test_name%in%unique(gtr_db$panel_name))
+#gtr_panels_list<-gtr_panels_list%>%filter(name_of_laboratory%in%unique(gtr_db$source) & lab_test_name%in%unique(gtr_db$panel_name))
   
 gtr_panels_list <-gtr_panels_list %>% 
   mutate(number_of_genes_cat = cut(
