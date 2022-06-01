@@ -16,9 +16,10 @@ output:
 </style>
 
 # TODO
-- method validation methods
-- get all the panels for a given phenotype such as HCM, and run the panel generator using each (and maybe combinations) and then test the ranks (mean,median,min) for the panelapp high confidence genes
-- consider clustering panels together and building panels based on the genes in the cluster
+- re-run gtr matrix builder (need to add the binary table to the save)
+- calculate the average/median distance between the different panels in a given set - call it concordance
+- show that concordance is stronger with the automatic search vs the naive search
+- NEED TO SHOW THAT WE ARE BETTER THAN THE NAIVE SEARCH AND NOT PANELAPP
 
 
 ```{r render_report,eval=F,echo=F}
@@ -48,7 +49,9 @@ minimal_number_of_genes_in_panel<-3
 # first fix the manually collected panels
 source_db_panels_with_enough_genes<-fixed_source_db%>%count(panel_joined_name)%>%filter(n>=minimal_number_of_genes_in_panel)%>%pull(panel_joined_name)
 fixed_source_db<-fixed_source_db%>%filter(panel_joined_name%in%source_db_panels_with_enough_genes)
-# second fix the gtr database
+# remove panelapp and clingen low conf genes
+fixed_source_db<-fixed_source_db%>%filter(!(source%in%c('panelapp','clingen') & confidence_level<2))
+
 gtr_db_panels_with_enough_genes<-gtr_db%>%count(panel_joined_name)%>%filter(n>=minimal_number_of_genes_in_panel)%>%pull(panel_joined_name)
 gtr_db<-gtr_db%>%filter(panel_joined_name%in%gtr_db_panels_with_enough_genes)
 
@@ -76,6 +79,12 @@ gene_num_cat_table%>%
     columns = c(2:7)
   )
 
+unique_sources<-gtr_db%>%pull(source)%>%unique()
+unique_panels<-gtr_db%>%pull(panel_joined_name)%>%unique()
+unique_panelapp_panels<-fixed_source_db%>%filter(source=='panelapp')%>%pull(panel_joined_name)%>%unique()
+source_summary_text<-paste0(glue('After exclusion, a total of {length(unique_panels)} panels from {length(unique_sources)} different vendors were collected from the GTR and {length(panelapp_panels)} panels were collected from PanelApp.'))
+
+source_summary_text
 ```
 
 Distance between panels was calculated using the Jaccard method. 
@@ -113,7 +122,7 @@ load('./data/pre_generated_data/manual_panels_data.Rdata')
 # gtr_dm_df<-convert_dm_to_df(gtr_dm)
 # 
 # # save gtr matrix and dataframe
-# save(gtr_with_expert_db,gtr_dm_df,file='./data/pre_generated_data/gtr_data.Rdata')
+# save(gtr_dm,gtr_binary_panel_gene_table,gtr_with_expert_db,gtr_dm_df,file='./data/pre_generated_data/gtr_data.Rdata')
 
 # load gtr data
 load('./data/pre_generated_data/gtr_data.Rdata')
@@ -123,27 +132,36 @@ load('./data/pre_generated_data/gtr_data.Rdata')
 
 ## Example: Selected genes
 ```{r panels_discrepancy}
-panel_names<-gtr_dm_df%>%pull(row)%>%unique()
+all_panel_names<-gtr_dm_df%>%pull(row)%>%unique()
 panelapp_panels<-grep('panelapp',panel_names,ignore.case = T,value = T)
 
+
+summary_text<-paste0(glue('In this study we focus on {length(selected_phenotypes)} phenotypes: {paste0(selected_phenotypes,collapse=", ")}'))
+
 # panels discrepancy
-panels_discrepancy_analysis<-function(phenotype_name,phenotype_panels,gtr_with_expert_db,panel_to_compare){
+# if all genes vs pubmed for the phenotype was already calculated, can use it and skip the pubmed search part
+panels_discrepancy_analysis<-function(phenotype_name,
+                                      phenotype_panels,
+                                      gtr_with_expert_db,
+                                      panel_to_compare,
+                                      all_genes_vs_pubmed=NA){
   discrepancy_analysis_res<-list()
   discrepancy_analysis_res$relatedness<-get_panel_relatedness_stats(phenotype_panels,
                                                                     gtr_with_expert_db,
-                                                                    panel_to_compare = panelapp_panel,
-                                                                    remove_low_conf = T)
-  # run pubmed search for hcm and the genes in the list
-  discrepancy_analysis_res$gene_list<-gtr_with_expert_db%>%filter(panel_joined_name%in%phenotype_panels)%>%pull(gene_symbol)%>%unique()
+                                                                    panel_to_compare = panel_to_compare)
+  
   # run pubmed search for each gene in the panels 
-  discrepancy_analysis_res$panel_genes_pubmed_search<-pubmed_gene_list_vs_phenotype(phenotype_name,discrepancy_analysis_res$gene_list)
+  if (is.na(all_genes_vs_pubmed)){
+    discrepancy_analysis_res$panel_genes_pubmed_search<-pubmed_gene_list_vs_phenotype(phenotype_name,discrepancy_analysis_res$relatedness$gene_list)
+  }else{
+    discrepancy_analysis_res$panel_genes_pubmed_search<-all_genes_vs_pubmed%>%filter(gene_symbol%in%discrepancy_analysis_res$relatedness$gene_list)
+  }
   discrepancy_analysis_res$panel_vs_pubmed <-
     summarize_panel_vs_phenotype_pubmed(
       selected_panels = phenotype_panels,
       gtr_with_expert_db = gtr_with_expert_db,
       panel_genes_pubmed_search = discrepancy_analysis_res$panel_genes_pubmed_search,
-      panelapp_panel = panel_to_compare,
-      min_conf_level = 2
+      panelapp_panel = panel_to_compare
     )
   
   discrepancy_analysis_res$num_publications_per_gene_vs_in_panelapp_plot<-
@@ -152,6 +170,8 @@ panels_discrepancy_analysis<-function(phenotype_name,phenotype_panels,gtr_with_e
     plot_num_of_publications_vs_rate_of_panels(discrepancy_analysis_res$panel_vs_pubmed)
   discrepancy_analysis_res$num_of_genes_with_publications_vs_rate_of_panels_plot<-
     plot_num_of_genes_with_publications_vs_rate_of_panels(discrepancy_analysis_res$panel_vs_pubmed)
+  discrepancy_analysis_res$num_of_genes_with_publications_vs_rate_of_panels_plot<-
+    plot_num_of_genes_with_publications_vs_rate_of_panels_with_panelapp(discrepancy_analysis_res$panel_vs_pubmed)
   
   discrepancy_analysis_res$summary_text<-get_relatedness_summary_text(phenotype_name,
                                                              discrepancy_analysis_res$relatedness,
@@ -164,6 +184,14 @@ panels_discrepancy_analysis<-function(phenotype_name,phenotype_panels,gtr_with_e
 phenotype_name<-'hypertrophic cardiomyopathy'
 panelapp_panel<-"panelapp|49|Hypertrophic cardiomyopathy - teen and adult" 
 hcm_panels<-grep('osteo',grep('hypertrophic|hcm',panel_names,ignore.case = T,value=T),ignore.case = T,invert = T,value=T)
+
+# panels concordance
+remotes::install_github("philliplab/yasss")
+library(yasss)
+hcm_binary<-gtr_binary_panel_gene_table%>%filter(rownames(gtr_binary_panel_gene_table)%in%hcm_panels)
+# generate distance matrix between all the panels
+hcm_dm<-generate_distance_matrix(hcm_binary)
+# need to consider how to summarize this distance matrix... maybe just summarize the distances calculated
 
 hcm_discrepancy<-panels_discrepancy_analysis(phenotype_name,
                                              hcm_panels,
@@ -181,6 +209,14 @@ epilepsy_discrepancy<-panels_discrepancy_analysis(phenotype_name,
                                              panelapp_panel)
 
 
+# cholestasis
+phenotype_name<-'cholestasis'
+panelapp_panel<-"panelapp|544|Cholestasis" 
+cholestasis_panels<-grep('osteo',grep('cholesta',panel_names,ignore.case = T,value=T),ignore.case = T,invert = T,value = T)
+cholestasis_discrepacy<-panels_discrepancy_analysis(phenotype_name,
+                                             cholestasis_panels,
+                                             gtr_with_expert_db,
+                                             panelapp_panel)
 
 # Cleft
 phenotype_name<-'cleft lip'
@@ -211,6 +247,447 @@ upset(panels_mat,nsets=length(hcm_panels),nintersects = 20,order.by = 'freq')
 
 ```
 
+# HCM as an example of naive (text based) search VS a clustering based search VS a distance cutoff based search
+
+```{r hcm_naive_vs_auto}
+
+panelapp_panel<-"panelapp|49|Hypertrophic cardiomyopathy - teen and adult" 
+phenotype_name<-'hypertrophic cardiomyopathy'
+
+# first get the number of HCM publications for all the genes
+# all_genes<-gtr_with_expert_db%>%pull(gene_symbol)%>%unique()
+# all_genes_vs_hcm<-pubmed_gene_list_vs_phenotype(phenotype_name,all_genes)
+# save(all_genes_vs_hcm,file='./data/pre_generated_data/all_genes_vs_hcm.RData')
+load('./data/pre_generated_data/all_genes_vs_hcm.RData')
+all_genes_with_hcm_pub<-all_genes_vs_hcm%>%filter(pub_num>0)%>%pull(gene_symbol)
+
+# panelapp metrics
+all_metrics<-NULL
+metrics_panelapp<-calculate_sens_and_ppv_vs_pubmed(gtr_with_expert_db%>%filter(panel_joined_name==panelapp_panel)%>%pull(gene_symbol),all_genes_with_hcm_pub)
+metrics_panelapp$group<-'panelapp'
+all_metrics<-all_metrics%>%bind_rows(as.data.frame(metrics_panelapp))
+
+# naive search
+hcm_naive_panels<-grep('osteo',grep('hypertrophic|hcm',panel_names,ignore.case = T,value=T),ignore.case = T,invert = T,value=T)
+
+hcm_naive_discrepancy<-panels_discrepancy_analysis(phenotype_name,
+                                             hcm_naive_panels,
+                                             gtr_with_expert_db,
+                                             panelapp_panel,
+                                             all_genes_vs_pubmed = all_genes_vs_hcm)
+
+metrics_naive<-calculate_sens_and_ppv_vs_pubmed(hcm_naive_discrepancy$relatedness$gene_list,all_genes_with_hcm_pub)
+metrics_naive$group='naive_search'
+
+# cluster search
+# hc <- hclust(gtr_dm,method='ward.D' )
+# # cut tree
+# cut_avg <- cutree(hc,k = 100)
+# panel_clusters<-data.frame(panel_name=names(cut_avg),cluster=as.numeric(cut_avg))
+# # get the selected panelapp panel cluster
+# panelapp_cluster<-panel_clusters%>%filter(panel_name==panelapp_panel)%>%pull(cluster)
+# hcm_cluster_panels<-panel_clusters%>%filter(cluster==panelapp_cluster)%>%pull(panel_name)
+# 
+# setdiff(hcm_naive_panels,hcm_cluster_panels)
+# 
+# hcm_cluster_discrepancy<-panels_discrepancy_analysis(phenotype_name,
+#                                              hcm_cluster_panels,
+#                                              gtr_with_expert_db,
+#                                              panelapp_panel)
+# 
+# metrics_cluster<-calculate_sens_and_ppv_vs_pubmed(hcm_cluster_discrepancy$relatedness$gene_list,all_genes_with_hcm_pub)
+
+# check a range of number of clusters
+#all_metrics<-NULL
+clust_methods=c('ward.D','ward.D2')
+for (clust_method in clust_methods){
+  hc <- hclust(gtr_dm,method=clust_method)
+  for (cluster_size in c(50,75,100,150,200,300)){
+      cut_avg <- cutree(hc,k = cluster_size)
+      panel_clusters<-data.frame(panel_name=names(cut_avg),cluster=as.numeric(cut_avg))
+      # get the selected panelapp panel cluster
+      panelapp_cluster<-panel_clusters%>%filter(panel_name==panelapp_panel)%>%pull(cluster)
+      hcm_cluster_panels<-panel_clusters%>%filter(cluster==panelapp_cluster)%>%pull(panel_name)
+      
+      setdiff(hcm_naive_panels,hcm_cluster_panels)
+      
+      hcm_cluster_discrepancy<-panels_discrepancy_analysis(phenotype_name,
+                                                   hcm_cluster_panels,
+                                                   gtr_with_expert_db,
+                                                   panelapp_panel,
+                                                   all_genes_vs_pubmed = all_genes_vs_hcm)
+      
+      metrics_cluster<-calculate_sens_and_ppv_vs_pubmed(hcm_cluster_discrepancy$relatedness$gene_list,all_genes_with_hcm_pub)
+    
+      metrics_cluster$group=glue('method={clust_method},cluster_size={cluster_size}')
+    
+      all_metrics<-all_metrics%>%bind_rows(as.data.frame(metrics_cluster))
+  }
+}
+
+
+# distance search
+max_dist<-0.85
+
+hcm_dist_panels<-get_similar_panels_from_dm_df_by_prop(gtr_dm_df,selected_panel_name = panelapp_panel,top_most_similar = 1,maximal_distance = max_dist,names_only = T)
+
+#setdiff(hcm_dist_panels,hcm_cluster_panels)
+
+hcm_dist_discrepancy<-panels_discrepancy_analysis(phenotype_name,
+                                             hcm_dist_panels,
+                                             gtr_with_expert_db,
+                                             panelapp_panel,
+                                             all_genes_vs_pubmed = all_genes_vs_hcm)
+
+metrics_dist<-calculate_sens_and_ppv_vs_pubmed(hcm_dist_discrepancy$relatedness$gene_list,all_genes_with_hcm_pub)
+
+# check a range of distances
+#all_metrics<-NULL
+for (max_dist in c(0.65,0.7,0.75,0.8,0.85,0.9)){
+    hcm_dist_panels<-get_similar_panels_from_dm_df_by_prop(gtr_dm_df,
+                                                           selected_panel_name = panelapp_panel,top_most_similar = 1,
+                                                           maximal_distance = max_dist,
+                                                           names_only = T)
+  
+  #setdiff(hcm_dist_panels,hcm_cluster_panels)
+  
+  hcm_dist_discrepancy<-panels_discrepancy_analysis(phenotype_name,
+                                               hcm_dist_panels,
+                                               gtr_with_expert_db,
+                                               panelapp_panel,
+                                               all_genes_vs_pubmed = all_genes_vs_hcm)
+  
+  metrics_dist<-calculate_sens_and_ppv_vs_pubmed(hcm_dist_discrepancy$relatedness$gene_list,all_genes_with_hcm_pub)
+  metrics_dist$group=glue('max_dist={max_dist}')
+  
+  all_metrics<-all_metrics%>%bind_rows(as.data.frame(metrics_dist))
+}
+
+all_metrics%>%ggplot(aes(x=sensitivity,y=ppv,color=group))+
+  geom_point()+
+  theme_minimal()
+```
+
+# ADD CONCORDANCE CALCULATION
+consider: https://rdrr.io/github/philliplab/yasss/man/summarize_dmat.html
+```{r check_concordance}
+all_panel_names<-gtr_dm_df%>%pull(row)%>%unique()
+panelapp_panels<-grep('panelapp',all_panel_names,ignore.case = T,value = T)
+# for a given set of panels, calculate distance metrics between all panels
+phenotype_name<-'hypertrophic cardiomyopathy'
+panelapp_panel<-"panelapp|49|Hypertrophic cardiomyopathy - teen and adult" 
+naive_panels<-grep('osteo',grep('hypertrophic|hcm',all_panel_names,ignore.case = T,value=T),ignore.case = T,invert = T,value=T)
+
+
+
+panels_concordance<-NULL
+panels_concordance<-panels_concordance%>%bind_rows(data.frame(group='naive',
+                                                              subset_dm_df_by_gene_panel(naive_panels,gtr_dm_df)))
+
+# now do the same by dist
+max_dist<-0.85
+dist_panels<-get_similar_panels_from_dm_df_by_prop(gtr_dm_df,selected_panel_name = panelapp_panel,top_most_similar = 1,maximal_distance = max_dist,names_only = T)
+panels_concordance<-panels_concordance%>%bind_rows(data.frame(group='dist',
+                                                              subset_dm_df_by_gene_panel(dist_panels,gtr_dm_df)))
+
+
+panels_concordance%>%group_by(group)%>%select(value)%>%skimr::skim()
+
+panels_concordance%>%ggplot(aes(x=value,fill=group))+
+  geom_density(alpha=0.4)+
+  theme_minimal()
+```
+
+
+
+```{r check_dist_distribution_for_panelapp_panels}
+
+
+panelapp_panels_dist<-gtr_dm_df%>%filter(grepl('panelapp',row))%>%group_by(row)%>%
+  filter(col!=row)%>%
+  summarize(mean_dist=mean(value),
+            median_dist=median(value),
+            min_dist=min(value))%>%
+  left_join(gtr_with_expert_db%>%
+              filter(source=='panelapp')%>%
+              mutate(panel_joined_name=as.character(panel_joined_name))%>%
+              group_by(panel_joined_name)%>%
+              summarize(n_genes=n()),
+            by=c('row'='panel_joined_name'))
+
+panelapp_panels_dist%>%filter(n_genes<1000)%>%ggplot(aes(x=n_genes,y=min_dist))+
+  geom_point()+
+  theme_minimal()
+
+
+
+```
+
+# Naive vs auto
+
+```{r naive_vs_auto}
+all_panel_names<-gtr_dm_df%>%pull(row)%>%unique()
+panelapp_panels<-grep('panelapp',all_panel_names,ignore.case = T,value = T)
+
+naive_vs_auto_test<-function(panelapp_panel,phenotype_name,naive_search,all_panel_names){
+  
+  # first get the number of publications for all the genes
+  all_genes_vs_phenotype<-pubmed_phenotype_vs_all_genes(phenotype_name,gtr_with_expert_db)
+  #load('./data/pre_generated_data/all_genes_vs_hcm.RData')
+  all_genes_with_pheno_pub<-all_genes_vs_phenotype%>%filter(pub_num>0)%>%pull(gene_symbol)
+  
+  # panelapp metrics
+  all_metrics<-NULL
+  metrics_panelapp<-calculate_sens_and_ppv_vs_pubmed(gtr_with_expert_db%>%filter(panel_joined_name==panelapp_panel)%>%pull(gene_symbol),all_genes_with_pheno_pub)
+  metrics_panelapp$group<-'panelapp'
+  all_metrics<-all_metrics%>%bind_rows(as.data.frame(metrics_panelapp))
+  
+  # naive search
+  pheno_naive_panels<-grep(naive_search,all_panel_names,ignore.case = T,value=T)
+  
+  if (length(pheno_naive_panels)==0){
+    stop(glue('Error: could not find any panel corresponding to the submitted naive search: {naive_search}'))}
+  
+  # first calculate performance per panel
+  for (pheno_panel in pheno_naive_panels){
+    metrics_pheno_panel<-calculate_sens_and_ppv_vs_pubmed(gtr_with_expert_db%>%
+                                                            filter(panel_joined_name==pheno_panel)%>%
+                                                            pull(gene_symbol),
+                                                          all_genes_with_pheno_pub)
+    metrics_pheno_panel$group<-pheno_panel
+    all_metrics<-all_metrics%>%bind_rows(as.data.frame(metrics_pheno_panel))
+  }
+  
+  # then claculate performance for all panels
+  
+  naive_discrepancy<-panels_discrepancy_analysis(phenotype_name,
+                                               pheno_naive_panels,
+                                               gtr_with_expert_db,
+                                               panelapp_panel,
+                                               all_genes_vs_pubmed = all_genes_vs_phenotype)
+  
+  
+  metrics_naive<-calculate_sens_and_ppv_vs_pubmed(naive_discrepancy$relatedness$gene_list,all_genes_with_pheno_pub)
+  metrics_naive$group='naive_search'
+  all_metrics<-all_metrics%>%bind_rows(as.data.frame(metrics_naive))
+  
+  # cluster search
+  # check a range of number of clusters
+  #all_metrics<-NULL
+  # clust_methods=c('ward.D','ward.D2')
+  # for (clust_method in clust_methods){
+  #   hc <- hclust(gtr_dm,method=clust_method)
+  #   for (cluster_size in c(50,75,100,150,200,300)){
+  #       cut_avg <- cutree(hc,k = cluster_size)
+  #       panel_clusters<-data.frame(panel_name=names(cut_avg),cluster=as.numeric(cut_avg))
+  #       # get the selected panelapp panel cluster
+  #       panelapp_cluster<-panel_clusters%>%filter(panel_name==panelapp_panel)%>%pull(cluster)
+  #       cluster_panels<-panel_clusters%>%filter(cluster==panelapp_cluster)%>%pull(panel_name)
+  #       
+  #       #setdiff(naive_panels,cluster_panels)
+  #       
+  #       cluster_discrepancy<-panels_discrepancy_analysis(phenotype_name,
+  #                                                    cluster_panels,
+  #                                                    gtr_with_expert_db,
+  #                                                    panelapp_panel,
+  #                                                    all_genes_vs_pubmed = all_genes_vs_phenotype)
+  #       
+  #       metrics_cluster<-calculate_sens_and_ppv_vs_pubmed(cluster_discrepancy$relatedness$gene_list,all_genes_with_pheno_pub)
+  #     
+  #       metrics_cluster$group=glue('method={clust_method},cluster_size={cluster_size}')
+  #     
+  #       all_metrics<-all_metrics%>%bind_rows(as.data.frame(metrics_cluster))
+  #   }
+  # }
+  
+  # check a range of distances
+  #all_metrics<-NULL
+  for (max_dist in c(0.65,0.75,0.85,0.95)){
+      dist_panels<-get_similar_panels_from_dm_df_by_prop(gtr_dm_df,
+                                                             selected_panel_name = panelapp_panel,top_most_similar = 1,
+                                                             maximal_distance = max_dist,
+                                                             names_only = T)
+    
+    #setdiff(dist_panels,cluster_panels)
+    
+    dist_discrepancy<-panels_discrepancy_analysis(phenotype_name,
+                                                 dist_panels,
+                                                 gtr_with_expert_db,
+                                                 panelapp_panel,
+                                                 all_genes_vs_pubmed = all_genes_vs_phenotype)
+    
+    metrics_dist<-calculate_sens_and_ppv_vs_pubmed(dist_discrepancy$relatedness$gene_list,all_genes_with_pheno_pub)
+    metrics_dist$group=glue('max_dist={max_dist}')
+    
+    all_metrics<-all_metrics%>%bind_rows(as.data.frame(metrics_dist))
+  }
+  
+  all_metrics%>%ggplot(aes(x=sensitivity,y=ppv,color=group))+
+    geom_point()+
+    theme_minimal()
+  return(all_metrics)
+}
+
+cholestasis_comp<-naive_vs_auto_test(phenotype_name='cholestasis',
+                                     panelapp_panel = "panelapp|544|Cholestasis",
+                                     naive_search = 'cholesta',
+                                     all_panel_names = all_panel_names)
+
+hcm_comp<-naive_vs_auto_test(phenotype_name='hypertrophic cardiomyopathy',
+                                     panelapp_panel = "panelapp|49|Hypertrophic cardiomyopathy - teen and adult" ,
+                                     naive_search = 'hcm|hypertrophic',
+                                     all_panel_names = all_panel_names)
+
+arrhythmia_comp<-naive_vs_auto_test(phenotype_name = 'cardiac arrhythmia',
+                                    panelapp_panel = "panelapp|842|Cardiac arrhythmias",
+                                    naive_search='arrhythmia',
+                                    all_panel_names = all_panel_names)
+```
+
+# Naive vs auto - selected panels
+
+```{r nva_selected}
+all_panel_names<-gtr_dm_df%>%pull(row)%>%unique()
+panelapp_panels<-grep('panelapp',all_panel_names,ignore.case = T,value = T)
+
+
+selected_phenotypes_panelapp<-c("panelapp|49|Hypertrophic cardiomyopathy - teen and adult",
+                                'panelapp|544|Cholestasis',
+                                'panelapp|149|Nephrocalcinosis or nephrolithiasis',
+                                'panelapp|179|Hydrocephalus',
+                                'panelapp|657|Autism',
+                                'panelapp|126|Hearing loss',
+                                'panelapp|294|Ocular coloboma',
+                                'panelapp|309|Skeletal dysplasia',
+                                'panelapp|386|Pancreatitis',
+                                'panelapp|285|Intellectual disability',
+                                'panelapp|943|Osteopetrosis',
+                                'panelapp|553|Ectodermal dysplasia',
+                                'panelapp|487|Cystic renal disease',
+                                'panelapp|258|Arthrogryposis',
+                                'panelapp|78|Holoprosencephaly')
+selected_phenotypes<-c('hypertrophic cardiomyopathy',
+                       'cholestasis',
+                       'nephrolithiasis',
+                       'hydrocephalus',
+                       'autism',
+                       'hearing loss',
+                       'coloboma',
+                       'skeletal dysplasia',
+                       'pancreatitis',
+                       'intellectual disability',
+                       'osteopetrosis',
+                       'ectodermal dysplasia',
+                       'polycystic kidney',
+                       'Arthrogryposis',
+                       'Holoprosencephaly')
+
+phenotype_queries<-c('hypertrophic cardio|hcm|cardio.+hypertrophic',
+                     'cholestasis',
+                     'nephrolithiasis|monogenic kidney stone',
+                     'hydrocephalus',
+                     'autism',
+                     'hearing loss|deafness',
+                     'coloboma',
+                     'skeletal dysplasia',
+                     'pancreatitis',
+                     'intellectual disability|mental retard',
+                     'osteopetrosis',
+                     'ectodermal dysplasia|ectoderm',
+                     'Cystic renal|polycys.*kidn',
+                     'Arthrogryposis',
+                     'Holoprosencephaly'
+                     )
+
+
+selected_phenotypes_df<-data.frame(phenotype_name=selected_phenotypes,
+                                   panelapp_panel=selected_phenotypes_panelapp,
+                                   query=phenotype_queries)
+
+selected_phenotypes_summary_text<-paste0(glue('In order to demonstrate the discrepancy between available panels, and the utility of our method, {nrow(selected_phenotypes_df)} phenotypes were selected: {paste0(selected_phenotypes,collapse=", ")}.'),
+                                         collapse=' ')
+                                  
+rentrez::set_entrez_key('9d71388851dd03b4991b6e25de46c7da7c08')
+httr::set_config(config = add_headers(timeout=50000))
+
+selected_phenotypes_naive_vs_auto<-list()
+for (selected_phenotype_name in selected_phenotypes[12:15]){
+  message(glue('Running comparison for {selected_phenotype_name}..'))
+  panelapp_panel<-selected_phenotypes_df%>%filter(phenotype_name==selected_phenotype_name)%>%pull(panelapp_panel)
+  naive_search<-selected_phenotypes_df%>%filter(phenotype_name==selected_phenotype_name)%>%pull(query)
+  selected_phenotypes_naive_vs_auto[[selected_phenotype_name]] <-
+    naive_vs_auto_test(
+      panelapp_panel = panelapp_panel,
+      phenotype_name = selected_phenotype_name,
+      naive_search =  naive_search,
+      all_panel_names = all_panel_names)
+}
+
+# now check the ranks for each 
+
+selected_phenotypes_naive_vs_auto_df<-NULL
+for (selected_phenotype in names(selected_phenotypes_naive_vs_auto)){
+  selected_phenotypes_naive_vs_auto_df<-selected_phenotypes_naive_vs_auto_df%>%
+    bind_rows(data.frame(phenotype=selected_phenotype,
+                         selected_phenotypes_naive_vs_auto[[selected_phenotype]]%>%
+                           mutate(rank=rank(desc(ppv),ties.method = 'min'))))
+}
+z<-selected_phenotypes_naive_vs_auto_df%>%group_by(group)%>%
+  summarize(skimr::skim_without_charts(rank))
+  
+
+
+```
+
+```{r pca}
+# Add PCA calculation
+test_binary<-gtr_binary_panel_gene_table[1:1000,1:1000]
+library(logisticPCA)
+logsvd_model = logisticSVD(test_binary, k = 2)
+plot(logsvd_model)
+
+panels = rownames(test_binary)
+plot(logsvd_model, type = "scores") + geom_point(aes()) + 
+  ggtitle("Exponential Family PCA") + scale_colour_manual(values = c("blue", "red"))
+
+library(FactoMineR)
+test_binary<-gtr_binary_panel_gene_table[,]
+res.mca <- FactoMineR::PCA(test_binary, 
+              ncp=2,graph=F)
+coords<-data.frame(panel=rownames(res.mca$ind$coord),res.mca$ind$coord)%>%
+  mutate(source=stringr::str_replace(panel,'\\|.+',''))
+
+to_plot<-coords%>%filter(panel%in%naive_panels)%>%mutate(group='naive_panels')%>%
+  bind_rows(coords%>%filter(panel%in%dist_panels)%>%mutate(group='dist_panels'))
+
+to_plot%>%
+  #filter(Dim.1<50,Dim.2<20)%>%
+  ggplot(aes(x=Dim.1,y=Dim.2,col=factor(source=='panelapp')))+
+  geom_point(alpha=0.4)#+facet_wrap(group~.)+
+  theme_minimal()
+
+```
+
+
+```{r check_dist_distribution_for_panelapp_panels}
+panelapp_panels_dist<-gtr_dm_df%>%filter(grepl('panelapp',row))%>%group_by(row)%>%
+  filter(col!=row)%>%
+  summarize(mean_dist=mean(value),
+            median_dist=median(value),
+            min_dist=min(value))%>%
+  left_join(gtr_with_expert_db%>%
+              filter(source=='panelapp')%>%
+              mutate(panel_joined_name=as.character(panel_joined_name))%>%
+              group_by(panel_joined_name)%>%
+              summarize(n_genes=n()),
+            by=c('row'='panel_joined_name'))
+
+panelapp_panels_dist%>%filter(n_genes<1000)%>%ggplot(aes(x=n_genes,y=min_dist))+
+  geom_point()+
+  theme_minimal()
+
+```
+
 
 
 ```{r cluster_panels}
@@ -220,7 +697,7 @@ hc <- hclust(gtr_dm,method='ward.D' )
 cut_avg <- cutree(hc,k = 100)
 panel_clusters<-data.frame(panel_name=names(cut_avg),cluster=as.numeric(cut_avg))
 # this is not bad - it actually groups similar panels together.. but what is the optimal number of clusters??
-# basically the purpose is to reduce false positives while maintaining high sensitivity - so i lets see what happens when i divide the panels into X clusters and go from there
+# basically the purpose is to reduce false positives while maintaining high sensitivity - so lets see what happens when i divide the panels into X clusters and go from there
 panel_clusters%>%dplyr::count(cluster)%>%arrange(n)
 
 ```
@@ -550,7 +1027,7 @@ selected_dm<-generate_distance_matrix(selected_bin_data)
 plot_dm_as_dendogram(selected_dm,selected_panel)
 # generate heatmap !!!
 
-hcm_panels<-row.names(binary_panel_gene_table)[grepl('hypertroph',row.names(binary_panel_gene_table),ignore.case = T) & grepl('cardio',row.names(binary_panel_gene_table),ignore.case=T) & !(grepl('hpo',row.names(binary_panel_gene_table),ignore.case = T))]
+panels<-row.names(binary_panel_gene_table)[grepl('hypertroph',row.names(binary_panel_gene_table),ignore.case = T) & grepl('cardio',row.names(binary_panel_gene_table),ignore.case=T) & !(grepl('hpo',row.names(binary_panel_gene_table),ignore.case = T))]
 
 ```
 

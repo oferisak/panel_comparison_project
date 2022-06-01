@@ -1,3 +1,8 @@
+
+
+
+
+# Fix the source db files (files specifying for each panel all the genes it contains (one gene per row))
 fix_source_db<-function(source_db){
   fixed_source_db <- source_db %>%
     mutate(gene_symbol = trimws(gene_symbol)) %>%

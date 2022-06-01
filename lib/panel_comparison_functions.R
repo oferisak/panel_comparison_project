@@ -16,6 +16,16 @@ calculate_panel_similarity<-function(panel_a,panel_b){
   return(similarity)
 }
 
+# A function that takes in a vector of gene panel names (joined panel names) and returns the subset of the dm_df with
+# all the pairs of panels
+subset_dm_df_by_gene_panel<-function(gene_panels,gtr_dm_df){
+  panels_dist<-gtr_dm_df%>%filter(row%in%gene_panels,col%in%gene_panels)%>%filter(row!=col)
+  panels_dist<-panels_dist%>%rowwise()%>%mutate(joined_panels=paste0(sort(c(row,col)),collapse='_'))%>%ungroup()
+  # remove duplicates
+  panels_dist<-panels_dist%>%dplyr::filter(!duplicated(joined_panels))
+  return(panels_dist)
+}
+
 # A function that takes in a panel (source + id) and calculates similarity with ALL other panels
 get_similarity_df_table_for_panel<-function(selected_source,selected_panel_id,panels_db){
   message(glue('Analyzing {selected_source}:{selected_panel_id}..'))
@@ -52,14 +62,9 @@ get_similarity_matrix<-function(source_db){
   return(similartiy_matrix)
 }
 
-create_binary_gene_table<-function(source_db,remove_low_conf=T){
+create_binary_gene_table<-function(source_db){
   # remove panelapp low confidence genes from source db
   binary_panel_gene_table<-source_db
-  if (remove_low_conf){
-    binary_panel_gene_table <-
-      binary_panel_gene_table %>% filter(!(source == 'panelapp' &
-                               confidence_level == 1))
-  }
   binary_panel_gene_table <-
     binary_panel_gene_table %>%
     unite(col = panel, sep = '|', source, panel_id, panel_name) %>%
@@ -103,8 +108,12 @@ find_panel_in_dm_df<-function(dm_df,source,panel_id=NA,panel_name=NA){
 # get similar panels from the distance matrix dataframe. 
 # if the distance is based on jaccard, then a value of 0.95 means that the panels are only 5% similar 
 # this function gets the top X% most similar panels, with a maximal distance of Y
-get_similar_panels_from_dm_df_by_prop<-function(dm_df,selected_panel_name,top_most_similar=0.05,maximal_distance=0.99){
+# if names_only = TRUE - will return only the panel names
+get_similar_panels_from_dm_df_by_prop<-function(dm_df,selected_panel_name,top_most_similar=0.05,maximal_distance=0.99,names_only=F){
   similar_panels_df<-dm_df%>%filter(row%in%selected_panel_name)%>%slice_min(prop = top_most_similar,order_by = value)%>%filter(value<maximal_distance)
+  
+  if (names_only){return(similar_panels_df%>%pull(col))}
+  
   return(similar_panels_df)
 }
 
@@ -202,12 +211,17 @@ compare_panel_vs_many_panels<-function(panel_a_joined,comparison_panel_joined_na
 # given a list of panel joined names - create a binary matrix and output metrics regarding their relatedness
 # also outputs a plot describing the number of genes that are found in each percentile of panels (for example how many genes are found in >90% of the samples)
 # if panel to compare is given, check how the genes in it are represented in the other panels
-get_panel_relatedness_stats <- function(panel_names,gtr_with_expert_db,panel_to_compare=NA,remove_low_conf=T) {
-  panels_bin<-create_binary_gene_table(gtr_with_expert_db%>%filter(panel_joined_name%in%panel_names),remove_low_conf = remove_low_conf)
+get_panel_relatedness_stats <- function(panel_names,gtr_with_expert_db,panel_to_compare=NA) {
+  panels_db<-gtr_with_expert_db%>%filter(panel_joined_name%in%panel_names)
+  panels_bin<-create_binary_gene_table(panels_db)
   relatedness_stats<-list()
+  relatedness_stats$gene_list<-colnames(panels_bin)
   relatedness_stats$num_of_panels<-length(panel_names)
   # number of genes in all panels
   relatedness_stats$num_of_genes<-ncol(panels_bin)
+  # per gene number of panels
+  relatedness_stats$panels_per_gene<-panels_db%>%group_by(gene_symbol)%>%summarize(npanels=n())%>%mutate(npanels_rate=npanels/relatedness_stats$num_of_panels)
+  
   # gene content in panels stats 
   relatedness_stats$genes_per_panel<-gtr_with_expert_db%>%
     filter(panel_joined_name%in%panel_names)%>%
@@ -230,15 +244,14 @@ get_panel_relatedness_stats <- function(panel_names,gtr_with_expert_db,panel_to_
     relatedness_stats$panel_to_compare<-panel_to_compare
     panel_to_compare_genes<-gtr_with_expert_db%>%filter(panel_joined_name==panel_to_compare)%>%
       dplyr::select(gene_symbol,confidence_level)
-    if (remove_low_conf){
-      panel_to_compare_genes<-panel_to_compare_genes%>%filter(confidence_level>1)
-    }
+    relatedness_stats$panel_to_compare_genes<-panel_to_compare_genes%>%pull(gene_symbol)
     panel_to_compare_genes<-panel_to_compare_genes%>%pull(gene_symbol)
     relatedness_stats$panel_to_compare_number_of_genes<-length(panel_to_compare_genes)
     relatedness_stats$panel_to_compare_percent_of_panels<-per_gene_stats%>%
       filter(genes%in%panel_to_compare_genes)%>%
       group_by(percent_of_panels_cat)%>%
       summarize(n=n(),rate=n/relatedness_stats$panel_to_compare_number_of_genes)
+    relatedness_stats$panel_to_compare_unique_genes<-relatedness_stats$panels_per_gene%>%filter(gene_symbol%in%panel_to_compare_genes,npanels==1)%>%pull(gene_symbol)
     
   }
   
@@ -248,14 +261,36 @@ get_panel_relatedness_stats <- function(panel_names,gtr_with_expert_db,panel_to_
 # A function that takes in the output of the get_panel_relatedness_stats function and (optinally) the 
 # summarize_panel_vs_phenotype_pubmed function output and produces a text summary
 get_relatedness_summary_text<-function(phenotype_name,phenotype_relatedness,panel_vs_pubmed=NA){
-  genes_in_top_0.9_panels<-phenotype_relatedness$percent_of_panels%>%filter(percent_of_panels_cat=="90-100%")%>%pull(n)
-  genes_in_top_0.9_panels<-ifelse(length(genes_in_top_0.9_panels)==0,0,genes_in_top_0.9_panels)
-  perc_genes_in_top_0.9_panels<-round(genes_in_top_0.9_panels/phenotype_relatedness$num_of_genes*100,1)
-  relatedness_text<-glue('For {phenotype_name}, we found {phenotype_relatedness$num_of_panels} panels in the GTR with {phenotype_relatedness$num_of_genes} genes (median {phenotype_relatedness$genes_per_panel$numeric.p50} genes, range [{phenotype_relatedness$genes_per_panel$numeric.p0},{phenotype_relatedness$genes_per_panel$numeric.p100}]). Out of the list of genes, only {genes_in_top_0.9_panels} genes ({perc_genes_in_top_0.9_panels}%) were found in more than 90% of the panels. There were {phenotype_relatedness$percent_of_panels%>%filter(percent_of_panels_cat=="0-10%")%>%pull(n)} genes ({round(phenotype_relatedness$percent_of_panels%>%filter(percent_of_panels_cat=="0-10%")%>%pull(rate)*100,1)}%) that were found in less than 10% of the panels.')
+  genes_in_top_0.9_panels<-phenotype_relatedness$panels_per_gene%>%filter(npanels_rate>=0.9)%>%pull(gene_symbol)
+  #genes_in_top_0.9_panels<-phenotype_relatedness$percent_of_panels%>%filter(percent_of_panels_cat=="90-100%")%>%pull(n)
+  num_genes_in_top_0.9_panels<-length(genes_in_top_0.9_panels)
+  perc_genes_in_top_0.9_panels<-round(num_genes_in_top_0.9_panels/phenotype_relatedness$num_of_genes*100,1)
+  relatedness_text<-paste0(glue('For {phenotype_name}, we found {phenotype_relatedness$num_of_panels} panels in the GTR with {phenotype_relatedness$num_of_genes} genes (median {phenotype_relatedness$genes_per_panel$numeric.p50} genes, range [{phenotype_relatedness$genes_per_panel$numeric.p0},{phenotype_relatedness$genes_per_panel$numeric.p100}]).'),
+                           glue('Out of the list of genes, only {num_genes_in_top_0.9_panels} genes ({perc_genes_in_top_0.9_panels}%) were found in more than 90% of the panels ({paste0(genes_in_top_0.9_panels,collapse=", ")}).'),
+                           glue('There were {phenotype_relatedness$percent_of_panels%>%filter(percent_of_panels_cat=="0-10%")%>%pull(n)} genes ({round(phenotype_relatedness$percent_of_panels%>%filter(percent_of_panels_cat=="0-10%")%>%pull(rate)*100,1)}%) that were found in less than 10% of the panels.'),
+                           collapse=' ')
+  
+  # if the panels were compared against pubmed
   if (!is.na(panel_vs_pubmed)){
     ngenes_no_pub<-sum(!panel_vs_pubmed$has_pub)
     ngenes_with_pub_0.1_panels<-nrow(panel_vs_pubmed%>%filter(n_panels_rate<0.1,has_pub))
-    relatedness_text<-glue('{relatedness_text} Among those genes, {ngenes_with_pub_0.1_panels} had at least one publication associating them with {phenotype_name}. For {ngenes_no_pub} genes ({round(100*ngenes_no_pub/phenotype_relatedness$num_of_genes,1)}%), a pubmed search did not identify any paper that associates them with {phenotype_name}.')
+    relatedness_text<-glue('{relatedness_text} Among those genes, {ngenes_with_pub_0.1_panels} appeared in at least one publication regarding {phenotype_name}. For {ngenes_no_pub} genes ({round(100*ngenes_no_pub/phenotype_relatedness$num_of_genes,1)}%), a pubmed search did not identify any paper that associates them with {phenotype_name}.',
+                           collapse=' ')
+  }
+  
+  # if the panels were compared against a specific panel
+  if (!is.null(phenotype_relatedness)){
+    
+    relatedness_text<-paste0(relatedness_text,
+                             glue('The {phenotype_relatedness$panel_to_compare} panel contains {phenotype_relatedness$panel_to_compare_number_of_genes} genes.'),
+                             glue('There were {length(phenotype_relatedness$panel_to_compare_unique_genes)} genes that were unique to this panel and were not suggested by other panels ({paste0(phenotype_relatedness$panel_to_compare_unique_genes,collapse=", ")}).'),
+                             collapse=' ')
+    if (!is.na(panel_vs_pubmed)){
+      panel_genes_without_pub<-panel_vs_pubmed%>%filter(gene_symbol %in% phenotype_relatedness$panel_to_compare_genes,!has_pub)%>%pull(gene_symbol)
+      relatedness_text<-paste0(relatedness_text,
+                               glue('For {length(panel_genes_without_pub)} genes in the panel ({paste0(panel_genes_without_pub,collapse=", ")}), we could not find any publication associating them with {phenotype_name}.'),
+                               collapse=' ')
+    }
   }
   return(relatedness_text)
 }
