@@ -46,8 +46,9 @@ if (!dir.exists(analysis_dir)){dir.create(analysis_dir)}
 ```{r definitions}
 # Define the minimal number of genes in a panel - panels with less genes will be excluded from the analysis (under the assumption that they are not panels per-se)
 minimal_number_of_genes_in_panel<-3
+maximal_number_of_genes_in_panel<-4000
 # first fix the manually collected panels
-source_db_panels_with_enough_genes<-fixed_source_db%>%count(panel_joined_name)%>%filter(n>=minimal_number_of_genes_in_panel)%>%pull(panel_joined_name)
+source_db_panels_with_enough_genes<-fixed_source_db%>%count(panel_joined_name)%>%filter(n>=minimal_number_of_genes_in_panel,n<=maximal_number_of_genes_in_panel)%>%pull(panel_joined_name)
 fixed_source_db<-fixed_source_db%>%filter(panel_joined_name%in%source_db_panels_with_enough_genes)
 # remove panelapp and clingen low conf genes
 fixed_source_db<-fixed_source_db%>%filter(!(source%in%c('panelapp','clingen') & confidence_level<2))
@@ -133,7 +134,7 @@ load('./data/pre_generated_data/gtr_data.Rdata')
 ## Example: Selected genes
 ```{r panels_discrepancy}
 all_panel_names<-gtr_dm_df%>%pull(row)%>%unique()
-panelapp_panels<-grep('panelapp',panel_names,ignore.case = T,value = T)
+panelapp_panels<-grep('panelapp',all_panel_names,ignore.case = T,value = T)
 
 
 summary_text<-paste0(glue('In this study we focus on {length(selected_phenotypes)} phenotypes: {paste0(selected_phenotypes,collapse=", ")}'))
@@ -164,14 +165,14 @@ panels_discrepancy_analysis<-function(phenotype_name,
       panelapp_panel = panel_to_compare
     )
   
-  discrepancy_analysis_res$num_publications_per_gene_vs_in_panelapp_plot<-
-    plot_num_of_publications_per_gene_vs_in_panelapp(discrepancy_analysis_res$panel_vs_pubmed)
-  discrepancy_analysis_res$num_of_publications_vs_rate_of_panels_plot<-
-    plot_num_of_publications_vs_rate_of_panels(discrepancy_analysis_res$panel_vs_pubmed)
-  discrepancy_analysis_res$num_of_genes_with_publications_vs_rate_of_panels_plot<-
-    plot_num_of_genes_with_publications_vs_rate_of_panels(discrepancy_analysis_res$panel_vs_pubmed)
-  discrepancy_analysis_res$num_of_genes_with_publications_vs_rate_of_panels_plot<-
-    plot_num_of_genes_with_publications_vs_rate_of_panels_with_panelapp(discrepancy_analysis_res$panel_vs_pubmed)
+  # discrepancy_analysis_res$num_publications_per_gene_vs_in_panelapp_plot<-
+  #   plot_num_of_publications_per_gene_vs_in_panelapp(discrepancy_analysis_res$panel_vs_pubmed)
+  # discrepancy_analysis_res$num_of_publications_vs_rate_of_panels_plot<-
+  #   plot_num_of_publications_vs_rate_of_panels(discrepancy_analysis_res$panel_vs_pubmed)
+  # discrepancy_analysis_res$num_of_genes_with_publications_vs_rate_of_panels_plot<-
+  #   plot_num_of_genes_with_publications_vs_rate_of_panels(discrepancy_analysis_res$panel_vs_pubmed)
+  # discrepancy_analysis_res$num_of_genes_with_publications_vs_rate_of_panels_plot<-
+  #   plot_num_of_genes_with_publications_vs_rate_of_panels_with_panelapp(discrepancy_analysis_res$panel_vs_pubmed)
   
   discrepancy_analysis_res$summary_text<-get_relatedness_summary_text(phenotype_name,
                                                              discrepancy_analysis_res$relatedness,
@@ -429,20 +430,29 @@ panelapp_panels_dist%>%filter(n_genes<1000)%>%ggplot(aes(x=n_genes,y=min_dist))+
 all_panel_names<-gtr_dm_df%>%pull(row)%>%unique()
 panelapp_panels<-grep('panelapp',all_panel_names,ignore.case = T,value = T)
 
-naive_vs_auto_test<-function(panelapp_panel,phenotype_name,naive_search,all_panel_names){
+naive_vs_auto_test<-function(panelapp_panel,
+                             phenotype_name,
+                             naive_search,
+                             all_panel_names,
+                             all_genes,
+                             pre_generated_gene_publications_list){
   
-  # first get the number of publications for all the genes
-  all_genes_vs_phenotype<-pubmed_phenotype_vs_all_genes(phenotype_name,gtr_with_expert_db)
-  #load('./data/pre_generated_data/all_genes_vs_hcm.RData')
-  all_genes_with_pheno_pub<-all_genes_vs_phenotype%>%filter(pub_num>0)%>%pull(gene_symbol)
+  test_res<-list()
+  
+  all_genes_vs_phenotype<-pubmed_gene_list_vs_phenotype(phenotype_name = phenotype_name,
+                                                          gene_list = all_genes,
+                                                          pre_generated_genes_pubs = pre_generated_gene_publications_list)
+  
+  all_genes_with_pheno_pub<-all_genes_vs_phenotype%>%filter(pub_num>1)%>%pull(gene_symbol)
+  message(glue('Out of {length(all_genes)} genes, {length(all_genes_with_pheno_pub)} had a publication mentioning {phenotype_name}'))
   
   # panelapp metrics
-  all_metrics<-NULL
+  test_res$all_metrics<-NULL
   metrics_panelapp<-calculate_sens_and_ppv_vs_pubmed(gtr_with_expert_db%>%filter(panel_joined_name==panelapp_panel)%>%pull(gene_symbol),all_genes_with_pheno_pub)
-  metrics_panelapp$group<-'panelapp'
-  all_metrics<-all_metrics%>%bind_rows(as.data.frame(metrics_panelapp))
+  metrics_panelapp$group<-panelapp_panel
+  test_res$all_metrics<-test_res$all_metrics%>%bind_rows(as.data.frame(metrics_panelapp))
   
-  # naive search
+  # naive search - with panelapp
   pheno_naive_panels<-grep(naive_search,all_panel_names,ignore.case = T,value=T)
   
   if (length(pheno_naive_panels)==0){
@@ -450,30 +460,52 @@ naive_vs_auto_test<-function(panelapp_panel,phenotype_name,naive_search,all_pane
   
   # first calculate performance per panel
   for (pheno_panel in pheno_naive_panels){
+    if (grepl('panelapp',pheno_panel)){next}#no need to calculate again
     metrics_pheno_panel<-calculate_sens_and_ppv_vs_pubmed(gtr_with_expert_db%>%
                                                             filter(panel_joined_name==pheno_panel)%>%
                                                             pull(gene_symbol),
                                                           all_genes_with_pheno_pub)
     metrics_pheno_panel$group<-pheno_panel
-    all_metrics<-all_metrics%>%bind_rows(as.data.frame(metrics_pheno_panel))
+    test_res$all_metrics<-test_res$all_metrics%>%bind_rows(as.data.frame(metrics_pheno_panel))
   }
   
   # then claculate performance for all panels
   
-  naive_discrepancy<-panels_discrepancy_analysis(phenotype_name,
+  test_res$naive_discrepancy<-panels_discrepancy_analysis(phenotype_name,
                                                pheno_naive_panels,
                                                gtr_with_expert_db,
                                                panelapp_panel,
                                                all_genes_vs_pubmed = all_genes_vs_phenotype)
   
   
-  metrics_naive<-calculate_sens_and_ppv_vs_pubmed(naive_discrepancy$relatedness$gene_list,all_genes_with_pheno_pub)
-  metrics_naive$group='naive_search'
-  all_metrics<-all_metrics%>%bind_rows(as.data.frame(metrics_naive))
+  metrics_naive<-calculate_sens_and_ppv_vs_pubmed(test_res$naive_discrepancy$relatedness$gene_list,
+                                                  all_genes_with_pheno_pub)
+  metrics_naive$group='naive_search - with panelapp'
+  test_res$all_metrics<-test_res$all_metrics%>%bind_rows(as.data.frame(metrics_naive))
+  
+  # naive search - no panelapp
+  pheno_naive_panels_no_panelapp<-grep('panelapp',pheno_naive_panels,invert = T,value=T)
+  
+  if (length(pheno_naive_panels_no_panelapp)==0){
+    stop(glue('Error: could not find any panel corresponding to the submitted naive search: {naive_search}'))}
+  
+  # then claculate performance for all panels
+  
+  test_res$naive_no_panelapp_discrepancy<-panels_discrepancy_analysis(phenotype_name,
+                                               pheno_naive_panels_no_panelapp,
+                                               gtr_with_expert_db,
+                                               panelapp_panel,
+                                               all_genes_vs_pubmed = all_genes_vs_phenotype)
+  
+  
+  metrics_naive<-calculate_sens_and_ppv_vs_pubmed(test_res$naive_no_panelapp_discrepancy$relatedness$gene_list,
+                                                  all_genes_with_pheno_pub)
+  metrics_naive$group='naive_search - no panelapp'
+  test_res$all_metrics<-test_res$all_metrics%>%bind_rows(as.data.frame(metrics_naive))
+  
   
   # cluster search
   # check a range of number of clusters
-  #all_metrics<-NULL
   # clust_methods=c('ward.D','ward.D2')
   # for (clust_method in clust_methods){
   #   hc <- hclust(gtr_dm,method=clust_method)
@@ -483,65 +515,53 @@ naive_vs_auto_test<-function(panelapp_panel,phenotype_name,naive_search,all_pane
   #       # get the selected panelapp panel cluster
   #       panelapp_cluster<-panel_clusters%>%filter(panel_name==panelapp_panel)%>%pull(cluster)
   #       cluster_panels<-panel_clusters%>%filter(cluster==panelapp_cluster)%>%pull(panel_name)
-  #       
+  # 
   #       #setdiff(naive_panels,cluster_panels)
-  #       
-  #       cluster_discrepancy<-panels_discrepancy_analysis(phenotype_name,
+  # 
+  #       test_res$cluster_discrepancy<-panels_discrepancy_analysis(phenotype_name,
   #                                                    cluster_panels,
   #                                                    gtr_with_expert_db,
   #                                                    panelapp_panel,
   #                                                    all_genes_vs_pubmed = all_genes_vs_phenotype)
-  #       
-  #       metrics_cluster<-calculate_sens_and_ppv_vs_pubmed(cluster_discrepancy$relatedness$gene_list,all_genes_with_pheno_pub)
-  #     
+  # 
+  #       metrics_cluster<-calculate_sens_and_ppv_vs_pubmed(test_res$cluster_discrepancy$relatedness$gene_list,all_genes_with_pheno_pub)
+  # 
   #       metrics_cluster$group=glue('method={clust_method},cluster_size={cluster_size}')
-  #     
-  #       all_metrics<-all_metrics%>%bind_rows(as.data.frame(metrics_cluster))
+  # 
+  #       test_res$all_metrics<-test_res$all_metrics%>%bind_rows(as.data.frame(metrics_cluster))
   #   }
   # }
   
   # check a range of distances
   #all_metrics<-NULL
-  for (max_dist in c(0.65,0.75,0.85,0.95)){
+  for (max_dist in c(0.7,0.75,0.8,0.85,0.95)){
       dist_panels<-get_similar_panels_from_dm_df_by_prop(gtr_dm_df,
-                                                             selected_panel_name = panelapp_panel,top_most_similar = 1,
+                                                             selected_panel_name = panelapp_panel,
+                                                             top_most_similar = 1,
                                                              maximal_distance = max_dist,
                                                              names_only = T)
     
     #setdiff(dist_panels,cluster_panels)
     
-    dist_discrepancy<-panels_discrepancy_analysis(phenotype_name,
+    discrepancy_name<-glue('dist_discrepancy_{max_dist}')
+    test_res[[discrepancy_name]]<-panels_discrepancy_analysis(phenotype_name,
                                                  dist_panels,
                                                  gtr_with_expert_db,
                                                  panelapp_panel,
                                                  all_genes_vs_pubmed = all_genes_vs_phenotype)
     
-    metrics_dist<-calculate_sens_and_ppv_vs_pubmed(dist_discrepancy$relatedness$gene_list,all_genes_with_pheno_pub)
+    metrics_dist<-calculate_sens_and_ppv_vs_pubmed(test_res[[discrepancy_name]]$relatedness$gene_list,all_genes_with_pheno_pub)
     metrics_dist$group=glue('max_dist={max_dist}')
     
-    all_metrics<-all_metrics%>%bind_rows(as.data.frame(metrics_dist))
+    test_res$all_metrics<-test_res$all_metrics%>%bind_rows(as.data.frame(metrics_dist))
   }
   
-  all_metrics%>%ggplot(aes(x=sensitivity,y=ppv,color=group))+
+  test_res$all_metrics%>%ggplot(aes(x=sensitivity,y=ppv,color=group))+
     geom_point()+
     theme_minimal()
-  return(all_metrics)
+  return(test_res)
 }
 
-cholestasis_comp<-naive_vs_auto_test(phenotype_name='cholestasis',
-                                     panelapp_panel = "panelapp|544|Cholestasis",
-                                     naive_search = 'cholesta',
-                                     all_panel_names = all_panel_names)
-
-hcm_comp<-naive_vs_auto_test(phenotype_name='hypertrophic cardiomyopathy',
-                                     panelapp_panel = "panelapp|49|Hypertrophic cardiomyopathy - teen and adult" ,
-                                     naive_search = 'hcm|hypertrophic',
-                                     all_panel_names = all_panel_names)
-
-arrhythmia_comp<-naive_vs_auto_test(phenotype_name = 'cardiac arrhythmia',
-                                    panelapp_panel = "panelapp|842|Cardiac arrhythmias",
-                                    naive_search='arrhythmia',
-                                    all_panel_names = all_panel_names)
 ```
 
 # Naive vs auto - selected panels
@@ -549,7 +569,14 @@ arrhythmia_comp<-naive_vs_auto_test(phenotype_name = 'cardiac arrhythmia',
 ```{r nva_selected}
 all_panel_names<-gtr_dm_df%>%pull(row)%>%unique()
 panelapp_panels<-grep('panelapp',all_panel_names,ignore.case = T,value = T)
+all_genes<-gtr_with_expert_db%>%pull(gene_symbol)%>%unique()
+# run once to pre-generate the per gene publications data
+#pubmed_grab_all_gene_publications(all_genes)
+# load the pregenerated all gene publications
+load('./data/pre_generated_data/genes_pubmed_search.RData')
 
+
+pancreatitis_papers<-load('./data/pre_generated_data/pancreatitis_pubmed_search.RData')
 
 selected_phenotypes_panelapp<-c("panelapp|49|Hypertrophic cardiomyopathy - teen and adult",
                                 'panelapp|544|Cholestasis',
@@ -606,12 +633,11 @@ selected_phenotypes_df<-data.frame(phenotype_name=selected_phenotypes,
 
 selected_phenotypes_summary_text<-paste0(glue('In order to demonstrate the discrepancy between available panels, and the utility of our method, {nrow(selected_phenotypes_df)} phenotypes were selected: {paste0(selected_phenotypes,collapse=", ")}.'),
                                          collapse=' ')
-                                  
-rentrez::set_entrez_key('9d71388851dd03b4991b6e25de46c7da7c08')
-httr::set_config(config = add_headers(timeout=50000))
+selected_phenotypes_summary_text                                  
+# rentrez::set_entrez_key('be1775d2481f815d7d6f044bb0d0bca39f08')
 
 selected_phenotypes_naive_vs_auto<-list()
-for (selected_phenotype_name in selected_phenotypes[12:15]){
+for (selected_phenotype_name in selected_phenotypes){
   message(glue('Running comparison for {selected_phenotype_name}..'))
   panelapp_panel<-selected_phenotypes_df%>%filter(phenotype_name==selected_phenotype_name)%>%pull(panelapp_panel)
   naive_search<-selected_phenotypes_df%>%filter(phenotype_name==selected_phenotype_name)%>%pull(query)
@@ -620,21 +646,158 @@ for (selected_phenotype_name in selected_phenotypes[12:15]){
       panelapp_panel = panelapp_panel,
       phenotype_name = selected_phenotype_name,
       naive_search =  naive_search,
-      all_panel_names = all_panel_names)
+      all_genes = all_genes,
+      all_panel_names = all_panel_names,
+      pre_generated_gene_publications_list = entrez_pubmed_res)
 }
-
+save(selected_phenotypes_naive_vs_auto,file='./data/pre_generated_data/selected_phenotypes_naive_vs_auto.RData')
+#load('./data/pre_generated_data/selected_phenotypes_naive_vs_auto.RData')
 # now check the ranks for each 
 
 selected_phenotypes_naive_vs_auto_df<-NULL
 for (selected_phenotype in names(selected_phenotypes_naive_vs_auto)){
   selected_phenotypes_naive_vs_auto_df<-selected_phenotypes_naive_vs_auto_df%>%
     bind_rows(data.frame(phenotype=selected_phenotype,
-                         selected_phenotypes_naive_vs_auto[[selected_phenotype]]%>%
-                           mutate(rank=rank(desc(ppv),ties.method = 'min'))))
+                         selected_phenotypes_naive_vs_auto[[selected_phenotype]]$all_metrics%>%
+                           mutate(rank_f1=rank(desc(f1),ties.method = 'min'),
+                                  rank_sens=rank(desc(sensitivity),ties.method = 'min'),
+                                  rank_ppv=rank(desc(ppv),ties.method = 'min'))))
 }
-z<-selected_phenotypes_naive_vs_auto_df%>%group_by(group)%>%
-  summarize(skimr::skim_without_charts(rank))
+z<-selected_phenotypes_naive_vs_auto_df%>%
+  mutate(group=ifelse(grepl('^panelapp',group),'panelapp',group))%>%
+  filter(grepl('naive|panelapp$|max_dist|^panelapp|cluster',group))%>%group_by(group)%>%
+  select(-c(ngenes,phenotype))%>%
+  pivot_longer(-c(group))%>%
+  group_by(group,name)%>%
+  summarize(skimr::skim_without_charts(value))
   
+selected_phenotypes_naive_vs_auto_df%>%
+  mutate(group=ifelse(grepl('^panelapp',group),'panelapp',group))%>%
+  filter(grepl('naive|panelapp$|max_dist|^panelapp',group))%>%
+  select(group,rank_f1,rank_sens,rank_ppv)%>%
+  pivot_longer(-c(group))%>%
+  filter(group=='max_dist=0.75')%>%
+  ggplot(aes(x=value,fill=group))+
+  geom_histogram(alpha=0.3)+facet_wrap(name~.)+
+  theme_minimal()
+
+auto_generator_panelapp_only<-list()
+auto_generator_panelapp_with_similar<-list()
+max_dists=c(0.75,0.8,0.85,0.9,0.95)
+for (max_dist in max_dists){
+  auto_generator_panelapp_only[[glue('max_dist={max_dist}')]]<-list()
+  for (selected_phenotype_name in selected_phenotypes_df$phenotype_name){
+    message(glue('Generating panel for {selected_phenotype_name} max dist = {max_dist}'))
+    panelapp_panel<-selected_phenotypes_df%>%filter(phenotype_name==selected_phenotype_name)%>%pull(panelapp_panel)
+    # similar_panels<-get_similar_panels_from_dm_df_by_prop(gtr_dm_df,
+    #                                                       selected_panel_name = panelapp_panel,
+    #                                                       top_most_similar = 1,maximal_distance = 0.7,
+    #                                                       names_only = T)
+    auto_generator_panelapp_only[[glue('max_dist={max_dist}')]][[selected_phenotype_name]] <-
+      generate_panel_from_panels(
+        joined_panel_names = panelapp_panel,
+        gen_source_db = gtr_with_expert_db,
+        gen_dm_df = gtr_dm_df,
+        max_distance = max_dist,
+        with_mitochondrial = F)
+    # auto_generator_panelapp_with_similar[[glue('max_dist={max_dist}')]][[selected_phenotype_name]] <-
+    #   generate_panel_from_panels(
+    #     joined_panel_names = similar_panels,
+    #     gen_source_db = gtr_with_expert_db,
+    #     gen_dm_df = gtr_dm_df,
+    #     max_distance = max_dist,
+    #     with_mitochondrial = F)
+  }
+}
+
+# now add whether the gene is positive or not
+library(tidymodels)
+all_rocs<-NULL
+panelapp_roc<-NULL
+naive_roc<-NULL
+dist_roc<-NULL
+min_num_of_pub_to_consider_positive<-2
+
+for (selected_phenotype_name in selected_phenotypes_df$phenotype_name){
+  panelapp_panel<-selected_phenotypes_df%>%filter(phenotype_name==selected_phenotype_name)%>%pull(panelapp_panel)
+  for (max_dist in max_dists){
+    
+    all_genes_vs_phenotype<-pubmed_gene_list_vs_phenotype(phenotype_name = selected_phenotype_name,
+                                                            gene_list = all_genes,
+                                                            pre_generated_genes_pubs = entrez_pubmed_res)
+    all_genes_vs_phenotype<-all_genes_vs_phenotype%>%mutate(has_pub=factor(ifelse(pub_num>=min_num_of_pub_to_consider_positive,1,0)))
+    table_for_roc_panelapp_only<-all_genes_vs_phenotype%>%
+                  select(gene_symbol,has_pub)%>%
+      left_join(auto_generator_panelapp_only[[glue('max_dist={max_dist}')]][[selected_phenotype_name]])%>%
+      mutate(gene_score=ifelse(is.na(gene_score),0,gene_score),
+             rank_percentile=ifelse(is.na(rank_percentile),0,adjusted_gene_score),
+             num_o_panels=ifelse(is.na(num_o_panels),0,num_o_panels))%>%
+      mutate(gene_score_modified=ifelse(!is.na(in_original_panels)&(in_original_panels),gene_score+10,gene_score))
+    
+    # table_for_roc_panelapp_with_similar<-all_genes_vs_phenotype%>%
+    #               select(gene_symbol,has_pub)%>%
+    #   left_join(auto_generator_panelapp_with_similar[[glue('max_dist={max_dist}')]][[selected_phenotype_name]])%>%
+    #   mutate(gene_score=ifelse(is.na(gene_score),0,gene_score),
+    #          rank_percentile=ifelse(is.na(rank_percentile),0,adjusted_gene_score),
+    #          num_o_panels=ifelse(is.na(num_o_panels),0,num_o_panels))%>%
+    #   mutate(gene_score_with_panelapp=ifelse(!is.na(number_of_panels_with_gene),gene_score+num_o_panels,gene_score))
+    # 
+    all_rocs<-all_rocs%>%
+      bind_rows(data.frame(phenotype_name=selected_phenotype_name,
+                           group='gene_score',
+                           max_dist=max_dist,
+                           table_for_roc_panelapp_only%>%
+                             pr_curve(truth=has_pub,estimate=gene_score,event_level = 'second')))%>%
+      # bind_rows(data.frame(phenotype_name=selected_phenotype_name,
+      #                      group='gene_score_similar_panels',
+      #                      max_dist=max_dist,
+      #                      table_for_roc_panelapp_with_similar%>%
+      #                        pr_curve(truth=has_pub,estimate=gene_score,event_level = 'second')))
+      # bind_rows(data.frame(phenotype_name=selected_phenotype_name,
+      #                      group='rank_percentile',
+      #                      max_dist=max_dist,
+      #                      table_for_roc%>%
+      #                        pr_curve(truth=has_pub,estimate=rank_percentile,event_level = 'second')))%>%
+      # bind_rows(data.frame(phenotype_name=selected_phenotype_name,
+      #                      group='num_o_panels',
+      #                      max_dist=max_dist,
+      #                      table_for_roc%>%
+      #                        pr_curve(truth=has_pub,estimate=num_o_panels,event_level = 'second')))%>%
+      bind_rows(data.frame(phenotype_name=selected_phenotype_name,
+                           group='gene_score_modified',
+                           max_dist=max_dist,
+                           table_for_roc_panelapp_only%>%
+                             pr_curve(truth=has_pub,estimate=gene_score_modified,event_level = 'second')))
+    
+  }
+  panelapp_genes<-gtr_with_expert_db%>%filter(panel_joined_name==panelapp_panel)%>%pull(gene_symbol)
+  panelapp_roc<-panelapp_roc%>%
+    bind_rows(data.frame(phenotype_name=selected_phenotype_name,
+                         recall=sum(panelapp_genes%in%(all_genes_vs_phenotype%>%filter(has_pub==1)%>%pull(gene_symbol)))/length(all_genes_vs_phenotype%>%filter(has_pub==1)%>%pull(gene_symbol)),
+                         precision=sum(panelapp_genes%in%(all_genes_vs_phenotype%>%filter(has_pub==1)%>%pull(gene_symbol)))/length(panelapp_genes)))
+  
+  naive_genes<-selected_phenotypes_naive_vs_auto[[selected_phenotype_name]]$naive_discrepancy$relatedness$gene_list
+  naive_roc<-naive_roc%>%
+    bind_rows(data.frame(phenotype_name=selected_phenotype_name,
+                         recall=sum(naive_genes%in%(all_genes_vs_phenotype%>%filter(has_pub==1)%>%pull(gene_symbol)))/length(all_genes_vs_phenotype%>%filter(has_pub==1)%>%pull(gene_symbol)),
+                         precision=sum(naive_genes%in%(all_genes_vs_phenotype%>%filter(has_pub==1)%>%pull(gene_symbol)))/length(naive_genes)))
+  
+  dist_genes<-selected_phenotypes_naive_vs_auto[[selected_phenotype_name]]$dist_discrepancy_0.75$relatedness$gene_list
+  dist_roc<-dist_roc%>%
+    bind_rows(data.frame(phenotype_name=selected_phenotype_name,
+                         recall=sum(dist_genes%in%(all_genes_vs_phenotype%>%filter(has_pub==1)%>%pull(gene_symbol)))/length(all_genes_vs_phenotype%>%filter(has_pub==1)%>%pull(gene_symbol)),
+                         precision=sum(dist_genes%in%(all_genes_vs_phenotype%>%filter(has_pub==1)%>%pull(gene_symbol)))/length(dist_genes)))
+}
+
+
+
+all_rocs%>%filter(max_dist==0.85,grepl('gene_score$',group))%>%ggplot(aes(x=recall,y=precision,col=factor(group)))+
+  geom_line()+facet_wrap(phenotype_name~.)+
+  geom_abline(slope = -1,intercept = 1,linetype=2,alpha=0.5)+
+  geom_point(data=panelapp_roc,inherit.aes = F,aes(x=recall,y=precision))+
+  geom_point(data=naive_roc,inherit.aes = F,aes(x=recall,y=precision),col='red')+
+  #geom_point(data=dist_roc,inherit.aes = F,aes(x=recall,y=precision),col='blue')+
+  theme_minimal()
 
 
 ```

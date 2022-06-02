@@ -1,11 +1,7 @@
 hgnc<-readr::read_delim('/media/SSD/Bioinformatics/Databases/hgnc/hgnc_complete_set.txt')
 
-# A function that takes in a phenotype name and a list of genes and returns how many publications connect each gene with the phenotype
-pubmed_gene_list_vs_phenotype<-function(phenotype_name,gene_list){
-  phenotype_query<-glue('{phenotype_name}[mesh]')
-  message(glue('running pubmed search for {phenotype_name}..'))
-  phenotype_search_res<- entrez_search(db="pubmed", term=phenotype_query,retmax=999999)$ids
-  # Get the gene IDs
+# Get ALL the publications for the given gene list
+pubmed_grab_all_gene_publications<-function(gene_list){
   genes_to_test<-data.frame(gene_symbol=gene_list)
   # add entrez_id to gene symbol in genes to test
   genes_to_test<-genes_to_test%>%left_join(hgnc%>%dplyr::select(symbol,entrez_id),by=c('gene_symbol'='symbol'))
@@ -19,9 +15,24 @@ pubmed_gene_list_vs_phenotype<-function(phenotype_name,gene_list){
   idChunks<-split(ids,f=c(1:nchunks))
   message(glue('will run {nchunks} search chunks..'))
   entrez_pubmed_res<-NA
-  for (idChunk in idChunks){
+  first_chunk<-1
+  tmp_chunk_file_name<-glue('./data/tmp_files/tmp_chunk')
+  tmp_res_file_name<-glue('./data/tmp_files/tmp_pubmed_res.RData')
+  if (file.exists(tmp_chunk_file_name)){
+    message('found tmp file. will parse it and continue from that position')
+    chunk_df<-readr::read_delim(tmp_chunk_file_name)
+    last_done_id<-chunk_df%>%pull(id_num)
+    message(glue('the chunk successfully tested was {last_done_id}. will continue from {last_done_id+1}'))
+    first_chunk<-last_done_id+1
+    load(tmp_res_file_name)
+    message(glue('Loaded the pre-ran pubmed search. contains {length(names(entrez_pubmed_res))} genes'))
+  }
+  for (i in first_chunk:length(names(idChunks))){
+    #for (idChunk in idChunks){
+    idChunk<-idChunks[[i]]
+    message(glue('Analyzing chunk number {i} ({length(idChunk)} genes)'))
     #print(sprintf('Analyzing %s',idChunk))
-    chunkLinks  <- entrez_link(db="pubmed", dbfrom="gene",id=idChunk,by_id=TRUE,config = add_headers(timeout=50000))
+    chunkLinks  <- entrez_link(db="pubmed", dbfrom="gene",id=idChunk,by_id=TRUE)
     print(class(chunkLinks))
     pubmedIDs<-lapply(chunkLinks, function(x) x$links$gene_pubmed)
     names(pubmedIDs)<-idChunk
@@ -30,8 +41,36 @@ pubmed_gene_list_vs_phenotype<-function(phenotype_name,gene_list){
     }else{
       entrez_pubmed_res<-c(entrez_pubmed_res,pubmedIDs)
     }
+    write.table(data.frame(id_num=i,status='DONE'),file=tmp_chunk_file_name,row.names = F,quote = F)
+    save(entrez_pubmed_res,file = tmp_res_file_name)
   }
+  message('Finished pubmed query. will save the search results for all the genes')
+  save(entrez_pubmed_res,file = './data/pre_generated_data/genes_pubmed_search.RData')
+  unlink(tmp_chunk_file_name)
+  unlink(tmp_res_file_name)
+}
+
+# A function that takes in a phenotype name and a list of genes and returns how many publications connect each gene with the phenotype
+pubmed_gene_list_vs_phenotype<-function(phenotype_name,gene_list,pre_generated_genes_pubs=NA){
+  phenotype_pubmed_search_file<-glue('./data/pre_generated_data/{phenotype_name}_pubmed_search.RData')
+  if (file.exists(phenotype_pubmed_search_file)){
+    message(glue('pubmed search for {phenotype_name} already performed. will load it..'))
+    load(phenotype_pubmed_search_file)
+    return(gene_phenotype_pubmed_search)
+  }
+  phenotype_query<-glue('{phenotype_name}[mesh]')
+  message(glue('running pubmed search for {phenotype_name}..'))
+  phenotype_search_res<- entrez_search(db="pubmed", term=phenotype_query,retmax=999999)$ids
+  message(glue('found {length(phenotype_search_res)} publications for {phenotype_name}'))
+  # Get the gene IDs
+  genes_to_test<-data.frame(gene_symbol=gene_list)
+  # add entrez_id to gene symbol in genes to test
+  genes_to_test<-genes_to_test%>%left_join(hgnc%>%dplyr::select(symbol,entrez_id),by=c('gene_symbol'='symbol'))
+  # remove genes without entrez id
+  genes_to_test<-genes_to_test%>%filter(!is.na(entrez_id))
   
+  entrez_pubmed_res<-pre_generated_genes_pubs
+
   #entrez_pubmed_res<-entrez_link(db="pubmed", dbfrom="gene",id=as.character(genes_to_test$entrez_id),by_id=TRUE)
   # retrieve the pubmed ids from the query result
   #gene_pubmed_ids<-lapply(entrez_pubmed_res, function(x) x$links$gene_pubmed)
@@ -44,6 +83,7 @@ pubmed_gene_list_vs_phenotype<-function(phenotype_name,gene_list){
     gene_phenotype_pubmed_search<-gene_phenotype_pubmed_search%>%
       bind_rows(data.frame(gene_symbol,pub_num=length(gene_phenotype_pubmeds),pubmed_ids=paste0(gene_phenotype_pubmeds,collapse=',')))
   }
+  save(gene_phenotype_pubmed_search,file=phenotype_pubmed_search_file)
   return(gene_phenotype_pubmed_search)
 }
 
