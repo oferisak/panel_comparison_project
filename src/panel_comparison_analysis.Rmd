@@ -133,12 +133,6 @@ load('./data/pre_generated_data/gtr_data.Rdata')
 
 ## Example: Selected genes
 ```{r panels_discrepancy}
-all_panel_names<-gtr_dm_df%>%pull(row)%>%unique()
-panelapp_panels<-grep('panelapp',all_panel_names,ignore.case = T,value = T)
-
-
-summary_text<-paste0(glue('In this study we focus on {length(selected_phenotypes)} phenotypes: {paste0(selected_phenotypes,collapse=", ")}'))
-
 # panels discrepancy
 # if all genes vs pubmed for the phenotype was already calculated, can use it and skip the pubmed search part
 panels_discrepancy_analysis<-function(phenotype_name,
@@ -503,35 +497,6 @@ naive_vs_auto_test<-function(panelapp_panel,
   metrics_naive$group='naive_search - no panelapp'
   test_res$all_metrics<-test_res$all_metrics%>%bind_rows(as.data.frame(metrics_naive))
   
-  
-  # cluster search
-  # check a range of number of clusters
-  # clust_methods=c('ward.D','ward.D2')
-  # for (clust_method in clust_methods){
-  #   hc <- hclust(gtr_dm,method=clust_method)
-  #   for (cluster_size in c(50,75,100,150,200,300)){
-  #       cut_avg <- cutree(hc,k = cluster_size)
-  #       panel_clusters<-data.frame(panel_name=names(cut_avg),cluster=as.numeric(cut_avg))
-  #       # get the selected panelapp panel cluster
-  #       panelapp_cluster<-panel_clusters%>%filter(panel_name==panelapp_panel)%>%pull(cluster)
-  #       cluster_panels<-panel_clusters%>%filter(cluster==panelapp_cluster)%>%pull(panel_name)
-  # 
-  #       #setdiff(naive_panels,cluster_panels)
-  # 
-  #       test_res$cluster_discrepancy<-panels_discrepancy_analysis(phenotype_name,
-  #                                                    cluster_panels,
-  #                                                    gtr_with_expert_db,
-  #                                                    panelapp_panel,
-  #                                                    all_genes_vs_pubmed = all_genes_vs_phenotype)
-  # 
-  #       metrics_cluster<-calculate_sens_and_ppv_vs_pubmed(test_res$cluster_discrepancy$relatedness$gene_list,all_genes_with_pheno_pub)
-  # 
-  #       metrics_cluster$group=glue('method={clust_method},cluster_size={cluster_size}')
-  # 
-  #       test_res$all_metrics<-test_res$all_metrics%>%bind_rows(as.data.frame(metrics_cluster))
-  #   }
-  # }
-  
   # check a range of distances
   #all_metrics<-NULL
   for (max_dist in c(0.7,0.75,0.8,0.85,0.95)){
@@ -630,6 +595,7 @@ phenotype_queries<-c('hypertrophic cardio|hcm|cardio.+hypertrophic',
 selected_phenotypes_df<-data.frame(phenotype_name=selected_phenotypes,
                                    panelapp_panel=selected_phenotypes_panelapp,
                                    query=phenotype_queries)
+
 
 selected_phenotypes_summary_text<-paste0(glue('In order to demonstrate the discrepancy between available panels, and the utility of our method, {nrow(selected_phenotypes_df)} phenotypes were selected: {paste0(selected_phenotypes,collapse=", ")}.'),
                                          collapse=' ')
@@ -789,17 +755,34 @@ for (selected_phenotype_name in selected_phenotypes_df$phenotype_name){
                          precision=sum(dist_genes%in%(all_genes_vs_phenotype%>%filter(has_pub==1)%>%pull(gene_symbol)))/length(dist_genes)))
 }
 
+all_rocs<-all_rocs%>%mutate(f1=(2 * precision * recall) / (precision + recall))
+all_rocs_max_f1<-all_rocs%>%group_by(phenotype_name,group,max_dist)%>%slice_max(n=1,order_by = f1,with_ties = F)
 
-
+# Plot precision recall curves and mark the pr for panelapp and the naive search
 all_rocs%>%filter(max_dist==0.85,grepl('gene_score$',group))%>%ggplot(aes(x=recall,y=precision,col=factor(group)))+
   geom_line()+facet_wrap(phenotype_name~.)+
   geom_abline(slope = -1,intercept = 1,linetype=2,alpha=0.5)+
   geom_point(data=panelapp_roc,inherit.aes = F,aes(x=recall,y=precision))+
   geom_point(data=naive_roc,inherit.aes = F,aes(x=recall,y=precision),col='red')+
+  geom_point(data=all_rocs_max_f1%>%filter(max_dist==0.85,grepl('gene_score$',group)),inherit.aes = F,aes(x=recall,y=precision),col='blue')+
   #geom_point(data=dist_roc,inherit.aes = F,aes(x=recall,y=precision),col='blue')+
   theme_minimal()
 
+# Discrepancy throughout selected panels
+percent_of_genes_in_less_than_10pct_of_panels_df<-NULL
+for (selected_phenotype_name in selected_phenotypes){
+  relatedness_df<-selected_phenotypes_naive_vs_auto[[selected_phenotype_name]]$naive_discrepancy$relatedness
+  percent_of_genes_in_less_than_10pct_of_panels<-relatedness_df$percent_of_panels%>%filter(percent_of_panels_cat=='0-10%')%>%pull(rate)
+  if (length(percent_of_genes_in_less_than_10pct_of_panels)==0){percent_of_genes_in_less_than_10pct_of_panels<-0}
+  percent_of_genes_in_less_than_10pct_of_panels_df<-percent_of_genes_in_less_than_10pct_of_panels_df%>%
+    bind_rows(data.frame(phenotype_name=selected_phenotype_name,
+                         num_of_panels=relatedness_df$num_of_panels,
+                         percent_of_genes_in_less_than_10pct_of_panels))
+}
+num_o_panels_summary<-skimr::skim_without_charts(percent_of_genes_in_less_than_10pct_of_panels_df$num_of_panels)
 
+discrepancy_text<-paste0(glue('For the selected phenotypes, a naive search identified, on average {num_o_panels_summary$numeric.mean} panels per phenotype (IQR [{num_o_panels_summary$numeric.p25},{num_o_panels_summary$numeric.p75}])'))
+discrepancy_text
 ```
 
 ```{r pca}
@@ -1028,7 +1011,7 @@ cluster_analysis_res%>%filter(method=='ward.D2')%>%select(-num_o_panels_with_mis
   geom_col(position='dodge')+facet_wrap(name~max_dist,scale='free')+
   theme_minimal()
 
-cluster_analysis_res%>%filter(method=='ward.D')%>%select(-num_o_panels_with_missing_genes)%>%
+cluster_analysis_re(2 * precision * sensitivity) / (precision + sensitivity)s%>%filter(method=='ward.D')%>%select(-num_o_panels_with_missing_genes)%>%
   pivot_longer(-c(cluster_size,max_dist,method))%>%
   ggplot(aes(x=cluster_size,y=value,col=factor(max_dist)))+
   geom_line()+facet_wrap(name~.,scale='free')+
@@ -1063,7 +1046,7 @@ for(cluster_size in cluster_sizes){
 
   
   clingen_df<-clingen_df%>%
-        left_join(panels_list%>%
+        left_join(pan(2 * precision * sensitivity) / (precision + sensitivity)els_list%>%
                     mutate(panel_joined_name=as.character(panel_joined_name)),by=c('row'='panel_joined_name'))%>%
         left_join(panel_clusters,by=c('row'='panel_name'))%>%dplyr::rename('row_cluster'=cluster)%>%
         left_join(panel_clusters,by=c('col'='panel_name'))%>%dplyr::rename('col_cluster'=cluster)
