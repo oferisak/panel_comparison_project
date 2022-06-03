@@ -36,8 +36,8 @@ generate_panel_from_panels<-function(joined_panel_names,gen_source_db,gen_dm_df,
   
   gene_rank<-gene_rank%>%mutate(rank_percentile=rank/nrow(gene_rank),
                                 adjusted_rank_percentile=adjusted_rank/nrow(gene_rank),
-                                scaled_gene_score=as.numeric(scale(gene_score)),
-                                scaled_adjusted_gene_score=as.numeric(scale(adjusted_gene_score)))
+                                scaled_gene_score=as.numeric(scale(gene_score,center=F)),# disabled center, so the score is limited by 0 at the bottom
+                                scaled_adjusted_gene_score=as.numeric(scale(adjusted_gene_score,center=F)))
   
   # gene_rank$rank_percentile=gene_rank$rank/nrow(gene_rank)
   # gene_rank$adjusted_rank_percentile=gene_rank$adjusted_rank/nrow(gene_rank)
