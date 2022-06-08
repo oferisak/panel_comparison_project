@@ -60,10 +60,6 @@ gtr_db<-gtr_db%>%filter(panel_joined_name%in%gtr_db_panels_with_enough_genes)
 
 # Source statistics
 
-First, we compared the panel and gene content of each source. 
-Altogether, we reviewed `r length(unique(source_db$source))` panel sources: `r paste0(unique(source_db$source),collapse=', ')`
-
-
 ```{r panel_stats,include=T,eval=T,message=F}
 source_stats<-get_source_stats(gtr_db)
 # Create a gt table based on preprocessed
@@ -80,10 +76,15 @@ gene_num_cat_table%>%
     columns = c(2:7)
   )
 
+number_of_genes_per_panel<-gtr_db%>%group_by(panel_joined_name)%>%summarize(n=n())
+number_of_genes_per_panel_summary<-skimr::skim_without_charts(number_of_genes_per_panel$n)
+
 unique_sources<-gtr_db%>%pull(source)%>%unique()
 unique_panels<-gtr_db%>%pull(panel_joined_name)%>%unique()
 unique_panelapp_panels<-fixed_source_db%>%filter(source=='panelapp')%>%pull(panel_joined_name)%>%unique()
-source_summary_text<-paste0(glue('After exclusion, a total of {length(unique_panels)} panels from {length(unique_sources)} different vendors were collected from the GTR and {length(panelapp_panels)} panels were collected from PanelApp.'))
+source_summary_text<-paste0(glue('After exclusion, a total of {length(unique_panels)} panels from {length(unique_sources)} different vendors were collected from the GTR and {length(unique_panelapp_panels)} panels were collected from PanelApp.'),
+                            glue('The median number of genes per panel was {number_of_genes_per_panel_summary$numeric.p25} (IQR[{number_of_genes_per_panel_summary$numeric.p50},{number_of_genes_per_panel_summary$numeric.p75}])'),
+                            collapse=' ')
 
 source_summary_text
 ```
@@ -147,11 +148,12 @@ selected_phenotypes_panelapp<-c("panelapp|49|Hypertrophic cardiomyopathy - teen 
                                 'panelapp|487|Cystic renal disease',
                                 'panelapp|258|Arthrogryposis',
                                 'panelapp|78|Holoprosencephaly',
-                                'panelapp|81|Clefting',
+                                #'panelapp|522|Familial melanoma', 
                                 'panelapp|652|Dilated cardiomyopathy - adult and teen',
                                 'panelapp|658|Corneal dystrophies',
                                 'panelapp|555|Ichthyosis and erythrokeratoderma',
-                                'panelapp|546|Lipodystrophy - childhood onset')
+                                'panelapp|546|Lipodystrophy - childhood onset',
+                                'panelapp|168|Craniosynostosis')
 selected_phenotypes<-c('hypertrophic cardiomyopathy',
                        'cholestasis',
                        'nephrolithiasis',
@@ -167,11 +169,12 @@ selected_phenotypes<-c('hypertrophic cardiomyopathy',
                        'polycystic kidney',
                        'Arthrogryposis',
                        'Holoprosencephaly',
-                       'cleft lip palate',
+                       #'melanoma',
                        'dilated cardiomyopathy',
                        'corneal dystrophy',
                        'ichthyosis',
-                       'lipodystrophy')
+                       'lipodystrophy',
+                       'craniosynostosis')
 
 phenotype_queries<-c('hypertrophic cardio|hcm|cardio.+hypertrophic',
                      'cholestasis',
@@ -188,11 +191,12 @@ phenotype_queries<-c('hypertrophic cardio|hcm|cardio.+hypertrophic',
                      'Cystic renal|polycys.*kidn',
                      'Arthrogryposis',
                      'Holoprosencephaly',
-                     'cleft',
+                     #'melanoma',
                      'dilated cardio|dcm',
                      'corneal dyst',
                      'ichthyosis',
-                     'lipodystrophy')
+                     'lipodystrophy',
+                     'craniosynostosis')
 
 
 selected_phenotypes_df<-data.frame(phenotype_name=selected_phenotypes,
@@ -200,7 +204,7 @@ selected_phenotypes_df<-data.frame(phenotype_name=selected_phenotypes,
                                    query=phenotype_queries)
 
 
-selected_phenotypes_summary_text<-paste0(glue('In order to demonstrate the discrepancy between available panels, and the utility of our method, {nrow(selected_phenotypes_df)} phenotypes were selected: {paste0(selected_phenotypes,collapse=", ")}.'),
+selected_phenotypes_summary_text<-paste0(glue('In order to demonstrate the discrepancy between available panels, and the utility of our method, {nrow(selected_phenotypes_df)} phenotypes were selected: {paste0("(",seq(1,20),") ",selected_phenotypes,collapse=", ")}.'),
                                          collapse=' ')
 selected_phenotypes_summary_text                  
 ```
@@ -234,8 +238,9 @@ for (selected_phenotype_name in selected_phenotypes){
       all_panel_names = all_panel_names,
       pre_generated_gene_publications_list = entrez_pubmed_res)
 }
-#save(selected_phenotypes_naive_vs_auto,file='./data/pre_generated_data/selected_phenotypes_naive_vs_auto.RData')
-#load('./data/pre_generated_data/selected_phenotypes_naive_vs_auto.RData')
+
+save(selected_phenotypes_analysis,file='./data/pre_generated_data/selected_phenotypes_analysis.RData')
+#load('./data/pre_generated_data/selected_phenotypes_analysis.RData')
 # now check the ranks for each 
 
 selected_phenotypes_analysis_df<-NULL
@@ -358,7 +363,7 @@ for (selected_phenotype_name in selected_phenotypes_df$phenotype_name){
                          recall=sum(panelapp_genes%in%(all_genes_vs_phenotype%>%filter(has_pub==1)%>%pull(gene_symbol)))/length(all_genes_vs_phenotype%>%filter(has_pub==1)%>%pull(gene_symbol)),
                          precision=sum(panelapp_genes%in%(all_genes_vs_phenotype%>%filter(has_pub==1)%>%pull(gene_symbol)))/length(panelapp_genes)))
   
-  naive_genes<-selected_phenotypes_analysis[[selected_phenotype_name]]$naive_discrepancy_genes
+  naive_genes<-selected_phenotypes_analysis[[selected_phenotype_name]]$naive_with_panelapp_genes
   naive_roc<-naive_roc%>%
     bind_rows(data.frame(phenotype_name=selected_phenotype_name,
                          recall=sum(naive_genes%in%(all_genes_vs_phenotype%>%filter(has_pub==1)%>%pull(gene_symbol)))/length(all_genes_vs_phenotype%>%filter(has_pub==1)%>%pull(gene_symbol)),
@@ -438,8 +443,11 @@ comparison_metrics<-
               mutate(group='distance_naive_recall'))%>%
   mutate(group=ifelse(grepl('^naive',group),'naive',group))
 
+
+excluded_phenos<-c('melanoma')
+comparison_metrics<-comparison_metrics%>%filter(!phenotype_name%in%excluded_phenos)
 # plot max f1 vs panelapp vs naive
-comparison_metrics%>%ggplot(aes(x=group,y=f1,fill=group))+
+comparison_metrics%>%filter(!grepl('distance_(naive|panel)',group))%>%ggplot(aes(x=group,y=f1,fill=group))+
   geom_col()+coord_flip()+
   facet_wrap(phenotype_name~.,ncol = 1)+
   guides(fill=F)+ggsci::scale_fill_nejm()+
@@ -459,6 +467,7 @@ all_rocs%>%filter(max_dist==0.85,grepl('gene_score$',group))%>%ggplot(aes(x=reca
 # Summary text
 
 ```{r summary_text}
+
 # Discrepancy throughout selected panels
 percent_of_genes_in_less_than_10pct_of_panels_df<-NULL
 for (selected_phenotype_name in selected_phenotypes){
@@ -481,7 +490,9 @@ discrepancy_text
 
 # Literature text
 
-comparison_metrics_summary<-comparison_metrics%>%group_by(group)%>%select(precision,recall,f1)%>%skimr::skim_without_charts()
+
+comparison_metrics_summary<-comparison_metrics%>%filter(!phenotype_name%in%excluded_phenos)%>%
+  group_by(group)%>%select(precision,recall,f1)%>%skimr::skim_without_charts()
 
 comparison_metrics_text<-comparison_metrics_summary%>%group_by(group,skim_variable)%>%
   summarize(metric_text=glue('a mean {skim_variable} of {round(numeric.mean,2)} (IQR[{round(numeric.p25,2)},{round(numeric.p75,2)}])'))
@@ -490,11 +501,12 @@ f1_comp<-comparison_metrics%>%ungroup()%>%select(phenotype_name,group,f1)%>%pivo
 recall_comp<-comparison_metrics%>%ungroup()%>%select(phenotype_name,group,recall)%>%pivot_wider(names_from = group,values_from = recall)
 precision_comp<-comparison_metrics%>%ungroup()%>%select(phenotype_name,group,precision)%>%pivot_wider(names_from = group,values_from = precision)
 
-
+# in cases where the precision was matched, check how many times the distance method achieved higher recall than panelapp
 better_recall_vs_panelapp <-
   recall_comp %>% filter(distance_panelapp_percision > panelapp) %>%
   filter(phenotype_name %in% (precision_comp %>% filter(abs(distance_panelapp_percision -
                                                              panelapp) < 0.05) %>% pull(phenotype_name)))
+# in cases where the recall was matched, check how many times the distance method achieved higher precision than naive
 better_precision_vs_naive <-
   precision_comp %>% filter(distance_naive_recall > naive) %>%
   filter(phenotype_name %in% (recall_comp %>% filter(abs(distance_naive_recall -
@@ -507,7 +519,7 @@ comparison_text<-paste0(glue('Compared to a literature search, PanelApp panels d
                         paste0(comparison_metrics_text%>%filter(group=='naive')%>%pull(metric_text), 
                         collapse=', '),
                         glue('. Distance based generated panels demonstrated '),
-                        paste0(comparison_metrics_text%>%filter(group=='gene_score')%>%pull(metric_text), 
+                        paste0(comparison_metrics_text%>%filter(group=='distance_max_f1')%>%pull(metric_text), 
                         collapse=', '),
                         glue('. For {nrow(f1_comp%>%filter(distance_max_f1>panelapp))}/{nrow(f1_comp)} ({round(100*nrow(f1_comp%>%filter(distance_max_f1>panelapp))/nrow(f1_comp),1)}%) of the phenotypes, the distance based panel achieved a higher F1 score compared to the PanelApp panel'),
                         glue('. For {nrow(better_recall_vs_panelapp)}/{nrow(recall_comp)} ({round(100*nrow(better_recall_vs_panelapp)/nrow(recall_comp),1)}%) of the phenotypes, the distance based panel achieved a higher sensitivity compared to the PanelApp panel while maintaining a comparable PPV'),
@@ -518,17 +530,42 @@ comparison_text
 # calculate between group comparisons
 params_list <- combn(unique(comparison_metrics$group), 2, FUN = list)
 
-# perform t test for each combination
-model_t <- map(.x = params_list,
-               .f = ~ tidy(wilcox.test(
-                 formula = precision ~ group,
-                 paired=T,
-                 data    = subset(comparison_metrics, group %in% .x),
-                 conf.int=T
-               )))
-names(model_t)<-params_list
-model_t
+# for some reason this doesnt work
+# # perform t test for each combination
+# model_t <- map(.x = params_list,
+#                .f = ~ tidy(t.test(
+#                  formula = recall ~ group,
+#                  paired=F,
+#                  data    = subset(comparison_metrics%>%filter(!(phenotype_name %in% c('cleft lip palate'))), group %in% .x),
+#                  conf.int=T
+#                )))
+# names(model_t)<-params_list
+# model_t
 
+# but this works and seems more legit - you can do this for these comparisons
+# distance f1 max vs panelapp f1
+# distance precision matched recall vs panelapp recall - to show that for a given PPV level, sensitivity is better
+# distance recall matched precision vs naive precision - to show that for a given sensitivity level, PPV is better
+library(report)
+precision_distance_vs_naive_recall_matched<-t.test(precision_comp%>%pull(distance_naive_recall),precision_comp%>%pull(naive),paired = T)
+report(precision_distance_vs_naive_recall_matched)
+precision_distance_vs_naive_recall_matched_df<-tidy(precision_naive_vs_distance_recall_matched)
+# make sure the recall is indeed matched
+t.test(recall_comp%>%pull(distance_naive_recall),recall_comp%>%pull(naive),paired = T)
+
+precision_matched_recall_comp<-precision_comp%>%filter(panelapp-distance_panelapp_percision<0.01)
+recall_distance_vs_panelapp_precision_matched<-t.test(recall_comp%>%pull(distance_panelapp_percision),recall_comp%>%pull(panelapp),paired = T)
+report(recall_distance_vs_panelapp_precision_matched)
+# make sure the precision is indeed matched
+precision_comp%>%select(distance_panelapp_percision,panelapp)%>%colMeans()
+t.test(precision_comp%>%pull(distance_panelapp_percision),precision_comp%>%pull(panelapp),paired = T)
+
+
+f1_distance_vs_panelapp_max<-t.test(f1_comp%>%pull(distance_max_f1),f1_comp%>%pull(panelapp),paired = T)
+report(f1_distance_vs_panelapp_max)
+
+f1_distance_vs_naive_max<-t.test(f1_comp%>%pull(distance_max_f1),f1_comp%>%pull(naive),paired = T)
+report(f1_distance_vs_naive_max)
 
 ```
 

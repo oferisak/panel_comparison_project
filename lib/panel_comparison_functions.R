@@ -383,7 +383,8 @@ compare_panelapp_naive_and_cluster<-function(panelapp_panel,
   message(glue('Collecting metrics for panelapp..'))
   # panelapp metrics
   test_res$all_metrics<-NULL
-  metrics_panelapp<-calculate_sens_and_ppv_vs_pubmed(gtr_with_expert_db%>%filter(panel_joined_name==panelapp_panel)%>%pull(gene_symbol),all_genes_with_pheno_pub)
+  test_res$panelapp_genes<-gtr_with_expert_db%>%filter(panel_joined_name==panelapp_panel)%>%pull(gene_symbol)
+  metrics_panelapp<-calculate_sens_and_ppv_vs_pubmed(test_res$panelapp_genes,all_genes_with_pheno_pub)
   metrics_panelapp$group<-panelapp_panel
   test_res$all_metrics<-test_res$all_metrics%>%bind_rows(as.data.frame(metrics_panelapp))
   
