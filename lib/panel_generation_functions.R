@@ -45,3 +45,36 @@ generate_panel_from_panels<-function(joined_panel_names,gen_source_db,gen_dm_df,
   return(gene_rank)
   
 }
+
+# A function that takes in a phenotype name, the results for the autogenerator for that phenotype and 
+# the results for the pubmed search for all the genes against that phenotype 
+# and calculates the pr curve for the scaled gene score 
+calculate_auto_generator_pr_for_phenotype<-function(phenotype_name,auto_generator_panel_res,all_genes_vs_phenotype){
+  
+  table_for_roc_panelapp_only<-all_genes_vs_phenotype%>%
+    select(gene_symbol,has_pub)%>%
+    left_join(auto_generator_panel_res)%>%
+    mutate(scaled_gene_score=ifelse(is.na(scaled_gene_score),0,scaled_gene_score),
+           rank_percentile=ifelse(is.na(rank_percentile),0,rank_percentile),
+           num_o_panels=ifelse(is.na(num_o_panels),0,num_o_panels))%>%
+    # add a modified gene score - if you want to test other options
+    mutate(gene_score_modified=ifelse(!is.na(in_original_panels)&(in_original_panels),scaled_gene_score+10,scaled_gene_score))
+  phenotype_auto_generator_pr_curve <-
+    data.frame(
+      phenotype_name = selected_phenotype_name,
+      group = 'gene_score',
+      table_for_roc_panelapp_only %>%
+        pr_curve(
+          truth = has_pub,
+          estimate = scaled_gene_score,
+          event_level = 'second'
+        )
+    )%>%
+    # if you want to add a modified score as well - if so MIND THAT YOU NEED TO CHANGE THE GROUP NAME IN THE MAIN SCRIPT
+    # bind_rows(data.frame(phenotype_name=selected_phenotype_name,
+    #                      group='gene_score_modified',
+    #                      table_for_roc_panelapp_only%>%
+    #                        pr_curve(truth=has_pub,estimate=gene_score_modified,event_level = 'second')))%>%
+    mutate(f1=(2 * precision * recall) / (precision + recall))
+  return(phenotype_auto_generator_pr_curve)
+}
