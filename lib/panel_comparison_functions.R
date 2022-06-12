@@ -361,6 +361,7 @@ panels_discrepancy_analysis<-function(phenotype_name,
 # -- every panel in the naive search
 # -- a unification of all the naive search panels, plus panelapp and without
 # -- for a panel corresponding to all the panels in the same cluster as the panelapp panel
+
 compare_panelapp_naive_and_cluster<-function(panelapp_panel,
                              phenotype_name,
                              naive_search,
@@ -369,7 +370,8 @@ compare_panelapp_naive_and_cluster<-function(panelapp_panel,
                              all_genes,
                              gtr_with_expert_db,
                              gtr_dm_df,
-                             pre_generated_gene_publications_list){
+                             pre_generated_gene_publications_list,
+                             min_num_of_pub_to_consider_positive=2){
   
   test_res<-list()
   
@@ -377,7 +379,7 @@ compare_panelapp_naive_and_cluster<-function(panelapp_panel,
                                                         gene_list = all_genes,
                                                         pre_generated_genes_pubs = pre_generated_gene_publications_list)
   
-  all_genes_with_pheno_pub<-all_genes_vs_phenotype%>%filter(pub_num>1)%>%pull(gene_symbol)
+  all_genes_with_pheno_pub<-all_genes_vs_phenotype%>%filter(pub_num>=min_num_of_pub_to_consider_positive)%>%pull(gene_symbol)
   message(glue('Out of {length(all_genes)} genes, {length(all_genes_with_pheno_pub)} had a publication mentioning {phenotype_name}'))
   
   message(glue('Collecting metrics for panelapp..'))
@@ -468,3 +470,4 @@ compare_panelapp_naive_and_cluster<-function(panelapp_panel,
   }
   return(test_res)
 }
+

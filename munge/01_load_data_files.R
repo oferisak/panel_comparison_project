@@ -13,6 +13,8 @@ load_source_dbs <- function() {
     source_db<-source_db%>%bind_rows(db_table)
   }
   source_db<-source_db%>%mutate(panel_joined_name=glue('{source}|{panel_id}|{panel_name}'))
+  # remove duplicates
+  source_db<-source_db%>%filter(!duplicated(source_db))
   return(source_db)
 }  
 

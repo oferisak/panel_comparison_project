@@ -51,14 +51,18 @@ pubmed_grab_all_gene_publications<-function(gene_list){
 }
 
 # A function that takes in a phenotype name and a list of genes and returns how many publications connect each gene with the phenotype
-pubmed_gene_list_vs_phenotype<-function(phenotype_name,gene_list,pre_generated_genes_pubs=NA){
+pubmed_gene_list_vs_phenotype<-function(phenotype_name,gene_list,pre_generated_genes_pubs=NA,with_mesh=F){
   phenotype_pubmed_search_file<-glue('./data/pre_generated_data/{phenotype_name}_pubmed_search.RData')
   if (file.exists(phenotype_pubmed_search_file)){
     message(glue('pubmed search for {phenotype_name} already performed. will load it..'))
     load(phenotype_pubmed_search_file)
     return(gene_phenotype_pubmed_search)
   }
-  phenotype_query<-glue('{phenotype_name}[mesh]')
+  if (with_mesh){
+    phenotype_query<-glue('{phenotype_name}[mesh]')
+  }else{
+    phenotype_query<-glue('"{phenotype_name}"')
+  }
   message(glue('running pubmed search for {phenotype_name}..'))
   phenotype_search_res<- entrez_search(db="pubmed", term=phenotype_query,retmax=999999)$ids
   message(glue('found {length(phenotype_search_res)} publications for {phenotype_name}'))
