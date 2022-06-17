@@ -233,12 +233,12 @@ get_panel_relatedness_stats <- function(panel_names,gtr_with_expert_db,panel_to_
   relatedness_stats$percent_of_panels<-per_gene_stats%>%group_by(percent_of_panels_cat)%>%
     summarize(n=n(),rate=n/relatedness_stats$num_of_genes)
   # generate a plot for the number of genes vs percent of panels
-  relatedness_stats$gene_percent_plot<-
-    per_gene_stats%>%
-    ggplot(aes(x=percent_of_panels_cat))+
-    geom_bar()+
-    labs(y='Number of genes',x='Percent of panels')+
-    theme_minimal()
+  # relatedness_stats$gene_percent_plot<-
+  #   per_gene_stats%>%
+  #   ggplot(aes(x=percent_of_panels_cat))+
+  #   geom_bar()+
+  #   labs(y='Number of genes',x='Percent of panels')+
+  #   theme_minimal()
   if (!is.na(panel_to_compare)){
     # check what is the status only for the genes in the panel to compare
     relatedness_stats$panel_to_compare<-panel_to_compare
@@ -263,7 +263,8 @@ get_panel_relatedness_stats <- function(panel_names,gtr_with_expert_db,panel_to_
 get_relatedness_summary_text<-function(phenotype_name,
                                        phenotype_relatedness,
                                        phenotype_distance_summary,
-                                       panel_vs_pubmed=NA){
+                                       panel_vs_pubmed=NA,
+                                       min_num_of_pub_to_consider_positive=2){
   genes_in_top_0.9_panels<-phenotype_relatedness$panels_per_gene%>%filter(npanels_rate>=0.9)%>%pull(gene_symbol)
   #genes_in_top_0.9_panels<-phenotype_relatedness$percent_of_panels%>%filter(percent_of_panels_cat=="90-100%")%>%pull(n)
   num_genes_in_top_0.9_panels<-length(genes_in_top_0.9_panels)
@@ -380,7 +381,7 @@ compare_panelapp_naive_and_cluster<-function(panelapp_panel,
                                                         pre_generated_genes_pubs = pre_generated_gene_publications_list)
   
   all_genes_with_pheno_pub<-all_genes_vs_phenotype%>%filter(pub_num>=min_num_of_pub_to_consider_positive)%>%pull(gene_symbol)
-  message(glue('Out of {length(all_genes)} genes, {length(all_genes_with_pheno_pub)} had a publication mentioning {phenotype_name}'))
+  message(glue('Out of {length(all_genes)} genes, {length(all_genes_with_pheno_pub)} had at least {min_num_of_pub_to_consider_positive} publications mentioning {phenotype_name}'))
   
   message(glue('Collecting metrics for panelapp..'))
   # panelapp metrics

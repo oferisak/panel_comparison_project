@@ -140,10 +140,10 @@ selected_phenotypes_panelapp<-c("panelapp|49|Hypertrophic cardiomyopathy - teen 
                                 'panelapp|285|Intellectual disability',
                                 'panelapp|943|Osteopetrosis',
                                 'panelapp|553|Ectodermal dysplasia',
-                                #'panelapp|487|Cystic renal disease',
+                                # #'panelapp|487|Cystic renal disease',
                                 'panelapp|258|Arthrogryposis',
                                 'panelapp|78|Holoprosencephaly',
-                                #'panelapp|522|Familial melanoma', 
+                                # #'panelapp|522|Familial melanoma', 
                                 'panelapp|652|Dilated cardiomyopathy - adult and teen',
                                 'panelapp|658|Corneal dystrophies',
                                 'panelapp|555|Ichthyosis and erythrokeratoderma',
@@ -181,7 +181,7 @@ selected_phenotypes<-c('hypertrophic cardiomyopathy',
                        'hypogonadotropic hypogonadism',
                        'aortic aneurysm',
                        'neuronal ceroid lipofuscinosis',
-                       'surfactant')
+                       'surfactant deficiency')
 
 phenotype_queries<-c('hypertrophic.*cardiomyopathy|hcm|cardiomyopathy.*hypertrophic',
                      'cholestasis',
@@ -237,6 +237,7 @@ for (selected_phenotype_name in selected_phenotypes){
   message(glue('Running comparison for {selected_phenotype_name}..'))
   panelapp_panel<-selected_phenotypes_df%>%filter(phenotype_name==selected_phenotype_name)%>%pull(panelapp_panel)
   naive_search<-selected_phenotypes_df%>%filter(phenotype_name==selected_phenotype_name)%>%pull(query)
+
   selected_phenotypes_analysis[[selected_phenotype_name]] <-
     compare_panelapp_naive_and_cluster(
       panelapp_panel = panelapp_panel,
@@ -284,7 +285,10 @@ panelapp_genes_not_in_search<-NULL
 literature_genes_not_in_panelapp<-NULL
 for (selected_phenotype in selected_phenotypes){
   panelapp_genes<-selected_phenotypes_analysis[[selected_phenotype]]$panelapp_genes
-  all_genes_vs_phenotype<-pubmed_phenotype_vs_all_genes(phenotype_name = selected_phenotype,gtr_with_expert_db = gtr_with_expert_db)
+  all_genes_vs_phenotype<-pubmed_gene_list_vs_phenotype(phenotype_name = phenotype_name,
+                                                        gene_list = all_genes,
+                                                        pre_generated_genes_pubs = pre_generated_gene_publications_list)
+  
   panelapp_genes_without_publications<-all_genes_vs_phenotype%>%filter(pub_num<2)%>%filter(gene_symbol%in%panelapp_genes)
   lit_genes_not_in_panelapp<-all_genes_vs_phenotype%>%filter(pub_num>1)%>%filter(!gene_symbol%in%panelapp_genes)
   panelapp_genes_not_in_search[[selected_phenotype]]<-panelapp_genes_without_publications
@@ -358,7 +362,7 @@ z<-knowledge_vs_phenotype$`hypertrophic cardiomyopathy`
 ```{r generate auto panels}
 auto_generator_panelapp_only<-list()
 auto_generator_panelapp_with_similar<-list()
-max_dists=c(0.75,0.85,0.95)
+max_dists=c(0.85,0.9,0.95,0.99)
 for (max_dist in max_dists){
   auto_generator_panelapp_only[[glue('max_dist={max_dist}')]]<-list()
   for (selected_phenotype_name in selected_phenotypes_df$phenotype_name){
@@ -384,6 +388,8 @@ for (max_dist in max_dists){
     #     with_mitochondrial = F)
   }
 }
+
+
 
 ```
 
@@ -411,10 +417,20 @@ for (selected_phenotype_name in selected_phenotypes_df$phenotype_name){
     phenotype_auto_generator_pr_curve <-
       calculate_auto_generator_pr_for_phenotype(phenotype_name = selected_phenotype_name,
                                                 auto_generator_panel_res = auto_generator_panel_res,
-                                                all_genes_vs_phenotype = all_genes_vs_phenotype)
+                                                all_genes_vs_phenotype = all_genes_vs_phenotype,
+                                                score_column = 'scaled_gene_score')
     auto_generator_rocs<-auto_generator_rocs%>%
       bind_rows(data.frame(phenotype_auto_generator_pr_curve,max_dist=max_dist)%>%
-                  mutate(group=glue('ag_{max_dist}')))# MIND THAT IF THE AUTO GENERATOR ROC IS FOR MORE THAN ONE SCORE (INCLUDES THE MODIFIED) YOU NEED TO GIVE EACH SCORE A DIFFERENT GROUP NAME
+                  mutate(group=glue('ag_{max_dist}')))
+    
+    phenotype_auto_generator_pr_curve <-
+      calculate_auto_generator_pr_for_phenotype(phenotype_name = selected_phenotype_name,
+                                                auto_generator_panel_res = auto_generator_panel_res,
+                                                all_genes_vs_phenotype = all_genes_vs_phenotype,
+                                                score_column = 'scaled_gene_score_exp')
+    auto_generator_rocs<-auto_generator_rocs%>%
+      bind_rows(data.frame(phenotype_auto_generator_pr_curve,max_dist=max_dist)%>%
+                  mutate(group=glue('ag_{max_dist}_modified')))
     
   }
   
@@ -445,6 +461,10 @@ for (selected_phenotype_name in selected_phenotypes_df$phenotype_name){
   
 }
 
+all_aucs<-auto_generator_rocs%>%group_by(phenotype_name,group)%>%distinct(pr_auc)%>%
+  ungroup()%>%group_by(group)%>%
+  summarize(pr_auc=mean(pr_auc))
+
 all_rocs<-auto_generator_rocs%>%
   bind_rows(panelapp_roc)%>%
   bind_rows(naive_roc)
@@ -461,11 +481,13 @@ all_rocs%>%
   facet_wrap(name~.)+
   guides(fill=F)+
   ggsci::scale_fill_nejm()+
-  theme_minimal()
+  theme_minimal()+
+  theme(legend.position = 'top')
 
 # compare rocs auto generator
-all_rocs%>%filter(group%in%c('ag_0.85'))%>%
-  filter(!.threshold%in%c(Inf,0))%>%
+all_rocs%>%
+  filter(grepl('ag_0.85',group))%>%
+  filter(!((.threshold==Inf) | (.threshold==0))) %>%
   ggplot(aes(x=recall,y=precision,col=factor(group)))+
   geom_line()+facet_wrap(phenotype_name~.)+
   geom_abline(slope = -1,intercept = 1,linetype=2,alpha=0.5)+
@@ -473,11 +495,142 @@ all_rocs%>%filter(group%in%c('ag_0.85'))%>%
   geom_point(data=naive_roc,inherit.aes = F,aes(x=recall,y=precision),col='red')+
   #geom_point(data=comparison_metrics%>%filter(group=='distance_max_f1'),inherit.aes = F,aes(x=recall,y=precision),col='blue')+
   #geom_point(data=dist_roc,inherit.aes = F,aes(x=recall,y=precision),col='blue')+
-  theme_minimal()
+  theme_minimal()+
+  theme(legend.position = 'top')
+
 
 ```
 
+# Machine learning method
 
+```{r ml_method}
+
+
+library(listr)
+auto_generator_panels_set<-auto_generator_panelapp_only[['max_dist=0.99']]
+# add has_pub
+ml_data<-NULL
+panels_per_gene<-gen_source_db%>%group_by(gene_symbol)%>%summarize(number_of_panels_with_gene=n())%>%ungroup()
+for (selected_phenotype_name in selected_phenotypes_df$phenotype_name){
+  
+  phenotype_ml_table<-pubmed_gene_list_vs_phenotype(phenotype_name = selected_phenotype_name,
+                                                            gene_list = all_genes,
+                                                            pre_generated_genes_pubs = entrez_pubmed_res)
+  phenotype_ml_table<-phenotype_ml_table%>%
+    mutate(has_pub=factor(ifelse(pub_num>=min_num_of_pub_to_consider_positive,1,0)))
+  # add the auto_generator gene information
+  phenotype_ml_table<-phenotype_ml_table%>%
+    left_join(auto_generator_panels_set[[selected_phenotype_name]])%>%
+    mutate(scaled_gene_score=ifelse(is.na(scaled_gene_score),0,scaled_gene_score),
+           in_original_panels=ifelse(is.na(in_original_panels),0,in_original_panels),
+           scaled_adjusted_gene_score=ifelse(is.na(scaled_adjusted_gene_score),0,scaled_adjusted_gene_score),
+           rank_percentile=ifelse(is.na(rank_percentile),0,rank_percentile),
+           num_o_panels=ifelse(is.na(num_o_panels),0,num_o_panels),
+           min_panel_dist=ifelse(is.na(min_panel_dist),1,min_panel_dist),
+           max_panel_dist=ifelse(is.na(max_panel_dist),1,max_panel_dist),
+           median_panel_dist=ifelse(is.na(median_panel_dist),1,median_panel_dist),
+           mean_panel_dist=ifelse(is.na(mean_panel_dist),1,mean_panel_dist),
+           )
+  
+  # select relevant columns
+  phenotype_ml_table<-phenotype_ml_table%>%select(-contains(c('pubmed_ids','pub_num')))
+  ml_data<-ml_data%>%bind_rows(data.frame(phenotype_name=selected_phenotype_name,
+                                          phenotype_ml_table))
+}
+
+# add total number of panels per gene
+ml_data<-ml_data%>%select(-number_of_panels_with_gene)%>%left_join(panels_per_gene)
+
+library(tidymodels)
+ml_data<-ml_data%>%mutate(has_pub=factor(ifelse(has_pub==1,'Y','N')))
+
+# some EDA
+eda_ml_data<-ml_data%>%pivot_longer(-c(phenotype_name,gene_symbol,has_pub,num_o_panels,number_of_panels_with_gene))
+eda_ml_data%>%
+  filter(name%in%c('scaled_gene_score'))%>%
+  ggplot(aes(x=phenotype_name,y=value,fill=has_pub))+
+  geom_boxplot(outlier.size = 0.4)+facet_wrap(name~.,scales='free',nrow=2)+
+  coord_flip()+
+  theme_minimal()
+
+eda_ml_data%>%
+  filter(name%in%c('scaled_gene_score'))%>%
+  ggplot(aes(x=number_of_panels_with_gene,y=value,col=has_pub))+
+  geom_point(alpha=0.5)+facet_wrap(phenotype_name~.,scales='free',nrow=2)+
+  theme_minimal()
+
+eda_ml_data%>%
+  filter(name%in%c('scaled_gene_score'))%>%
+  ggplot(aes(x=phenotype_name,y=num_o_panels,fill=has_pub))+
+  geom_boxplot()+facet_wrap(name~.,scales='free',nrow=2)+
+  theme_minimal()
+
+features<-setdiff(colnames(ml_data),c('phenotype_name','gene_symbol','has_pub',grep('^gene|rank$|^adjusted|size',colnames(ml_data),value=T)))
+features<-c('scaled_adjusted_gene_score','min_panel_dist','max_panel_dist','number_of_panels_with_gene')
+
+form<-as.formula(glue('has_pub~{paste0(features,collapse="+")}'))
+# divide training and test data using the phenotypes
+set.seed(1234)
+train_phenotypes<-sample(selected_phenotypes,15)
+test_phenotypes<-setdiff(selected_phenotypes,train_phenotypes)
+train_data<-ml_data%>%filter(phenotype_name%in%train_phenotypes,gene_score>0)
+
+# train down sampled
+train_downsample<-downsample_training_data(train_data,'has_pub',under_ratio = 5)
+test_data<-ml_data%>%filter(phenotype_name%in%test_phenotypes)
+
+model_def<-xgb_def()
+model_def<-glmnet_def()
+
+model_res<-train_model(train_data = train_downsample,
+                       model_def = model_def,
+                       formula = form,
+                       group = 'phenotype_name',
+                       grid_size = 20)
+
+model_res$train_metrics
+library(vip)
+model_vip<-model_res$model_fit%>%extract_fit_parsnip() %>%
+  vip(geom = "point")
+model_vip
+
+rf_testing_pred <- 
+  predict(model_res$model_fit, test_data) %>% 
+  bind_cols(predict(model_res$model_fit, test_data, type = "prob")) %>% 
+  bind_cols(test_data %>% select(phenotype_name,has_pub,scaled_gene_score))
+
+rf_testing_pred%>%
+  ggplot(aes(x=.pred_Y,fill=has_pub))+
+  geom_density(alpha=0.4)+
+  theme_minimal()
+
+rf_testing_pred%>%pr_auc(truth=has_pub,estimate=.pred_Y,event_level='second')
+test_data%>%pr_auc(truth=has_pub,estimate=scaled_gene_score,event_level='second')
+
+
+rf_testing_pred %>%
+  select(phenotype_name,has_pub,scaled_gene_score,.pred_Y)%>%
+  pivot_longer(-c(phenotype_name,has_pub))%>%
+  group_by(phenotype_name,name)%>%
+  ggplot(aes(x=value,fill=has_pub))+
+  facet_wrap(name~.,scales='free')+
+  geom_density(alpha=0.4)+
+  theme_minimal()
+
+rf_testing_pred %>%
+  select(phenotype_name,has_pub,scaled_gene_score,.pred_Y)%>%
+  pivot_longer(-c(phenotype_name,has_pub))%>%
+  group_by(phenotype_name,name)%>%
+  pr_curve(has_pub, value,event_level='second') %>%
+  ggplot(aes(x = recall, y = precision,col=name)) +
+  geom_line() +
+  facet_wrap(phenotype_name~.)+
+  geom_abline(
+    lty = 2, alpha = -0.5,
+    color = "gray50",
+    size = 1.2
+  )
+```
 # ROC analysis - vs textmining
 
 ```{r roc_analysis}
@@ -501,7 +654,8 @@ for (selected_phenotype_name in selected_phenotypes_df$phenotype_name){
     phenotype_auto_generator_pr_curve <-
       calculate_auto_generator_pr_for_phenotype(phenotype_name = selected_phenotype_name,
                                                 auto_generator_panel_res = auto_generator_panel_res,
-                                                all_genes_vs_phenotype = all_genes_vs_phenotype)
+                                                all_genes_vs_phenotype = all_genes_vs_phenotype,
+                                                score_column = 'scaled_gene_score')
     auto_generator_rocs<-auto_generator_rocs%>%
       bind_rows(data.frame(phenotype_auto_generator_pr_curve,max_dist=max_dist)%>%
                   mutate(group=glue('ag_{max_dist}')))# MIND THAT IF THE AUTO GENERATOR ROC IS FOR MORE THAN ONE SCORE (INCLUDES THE MODIFIED) YOU NEED TO GIVE EACH SCORE A DIFFERENT GROUP NAME

@@ -61,7 +61,7 @@ pubmed_gene_list_vs_phenotype<-function(phenotype_name,gene_list,pre_generated_g
   if (with_mesh){
     phenotype_query<-glue('{phenotype_name}[mesh]')
   }else{
-    phenotype_query<-glue('"{phenotype_name}"')
+    phenotype_query<-glue('{phenotype_name}')
   }
   message(glue('running pubmed search for {phenotype_name}..'))
   phenotype_search_res<- entrez_search(db="pubmed", term=phenotype_query,retmax=999999)$ids
@@ -178,19 +178,4 @@ calculate_sens_and_ppv_vs_pubmed<-function(generated_gene_list,pubmed_gene_list,
     gene_list_vs_pubmed<-gene_list_vs_pubmed%>%listr::list_rename(precision=ppv,recall=sensitivity)
   }
   return(gene_list_vs_pubmed)
-}
-
-# A function that takes in a phenotype and the panels database and searches for publications regarding the phenotype
-# for all the genes in the panels database
-pubmed_phenotype_vs_all_genes<-function(phenotype_name,gtr_with_expert_db){
-  all_genes<-gtr_with_expert_db%>%pull(gene_symbol)%>%unique()
-  all_genes_vs_phenotype_file<-glue('./data/pre_generated_data/all_genes_vs_{phenotype_name}.RData')
-  if (file.exists(all_genes_vs_phenotype_file)){
-    message(glue('{all_genes_vs_phenotype_file} already exists, will just load it'))
-    load(all_genes_vs_phenotype_file)
-  }else{
-    all_genes_vs_phenotype<-pubmed_gene_list_vs_phenotype(phenotype_name,all_genes)
-    save(all_genes_vs_phenotype,file=glue('./data/pre_generated_data/all_genes_vs_{phenotype_name}.RData'))
-  }
-  return(all_genes_vs_phenotype)
 }
