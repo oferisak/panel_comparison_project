@@ -252,19 +252,52 @@ for (selected_phenotype_name in selected_phenotypes){
       min_num_of_pub_to_consider_positive = min_num_of_pub_to_consider_positive)
 }
 
+# collect all text
+all_text<-c()
+all_text_df<-NULL
+for (selected_phenotype_name in selected_phenotypes){
+  phenotype_text<-selected_phenotypes_analysis[[selected_phenotype_name]]$relatedness_summary$summary_text$relatedness_text
+  phenotype_text_row<-selected_phenotypes_analysis[[selected_phenotype_name]]$relatedness_summary$summary_text$relatedness_table
+  all_text<-c(all_text,phenotype_text)
+  all_text_df<-all_text_df%>%bind_rows(phenotype_text_row)
+}
+write.table(data.frame(selected_phenotypes,discrepancy_text=all_text),file=glue('{analysis_dir}/discrepancy_text.tsv'),sep='\t',row.names = F,quote = F)
+
+# HCM discrepancy
+phenotype_name<-'hypertrophic cardiomyopathy'
+all_genes_vs_phenotype<-
+  pubmed_gene_list_vs_phenotype(
+    phenotype_name = phenotype_name,
+    gene_list = all_genes,
+    pre_generated_genes_pubs = pre_generated_gene_publications_list)
+  
+panels_discrepancy_analysis(phenotype_name = phenotype_name,
+                            phenotype_panels = selected_phenotypes_analysis[[phenotype_name]][['naive_panels']],
+                            gtr_with_expert_db = gtr_with_expert_db,
+                            panel_to_compare = selected_phenotypes_analysis[[phenotype_name]][['panelapp_panel']],
+                            gtr_dm_df = gtr_dm_df,
+                            all_genes_vs_pubmed = all_genes_vs_phenotype,
+                            min_num_of_pub_to_consider_positive=min_num_of_pub_to_consider_positive)
+
+# Autism discrepancy
+
+phenotype_name<-'autism'
+all_genes_vs_phenotype<-
+  pubmed_gene_list_vs_phenotype(
+    phenotype_name = phenotype_name,
+    gene_list = all_genes,
+    pre_generated_genes_pubs = pre_generated_gene_publications_list)
+panels_discrepancy_analysis(phenotype_name = phenotype_name,
+                            phenotype_panels = selected_phenotypes_analysis[[phenotype_name]][['naive_panels']],
+                            gtr_with_expert_db = gtr_with_expert_db,
+                            panel_to_compare = selected_phenotypes_analysis[[phenotype_name]][['panelapp_panel']],
+                            gtr_dm_df = gtr_dm_df,
+                            all_genes_vs_pubmed = all_genes_vs_phenotype,
+                            min_num_of_pub_to_consider_positive=min_num_of_pub_to_consider_positive)
+
 #save(selected_phenotypes_analysis,file='./data/pre_generated_data/selected_phenotypes_analysis.RData')
 #load('./data/pre_generated_data/selected_phenotypes_analysis.RData')
 # now check the ranks for each 
-
-selected_phenotypes_analysis_df<-NULL
-for (selected_phenotype in names(selected_phenotypes_analysis)){
-  selected_phenotypes_analysis_df<-selected_phenotypes_analysis_df%>%
-    bind_rows(data.frame(phenotype=selected_phenotype,
-                         selected_phenotypes_analysis[[selected_phenotype]]$all_metrics%>%
-                           mutate(rank_f1=rank(desc(f1),ties.method = 'min'),
-                                  rank_recall=rank(desc(recall),ties.method = 'min'),
-                                  rank_precision=rank(desc(precision),ties.method = 'min'))))
-}
 
 # Summarize the performance of panelapp vs naive
 methods_performance_metrics<-selected_phenotypes_analysis_df%>%

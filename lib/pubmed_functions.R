@@ -95,7 +95,8 @@ pubmed_gene_list_vs_phenotype<-function(phenotype_name,gene_list,pre_generated_g
 summarize_panel_vs_phenotype_pubmed<-function(selected_panels,
                                               panel_genes_pubmed_search,
                                               gtr_with_expert_db,
-                                              panelapp_panel=NA){
+                                              panelapp_panel=NA,
+                                              min_num_of_pub_to_consider_positive=2){
   panel_vs_pubmed<-panel_genes_pubmed_search%>%
     left_join(gtr_with_expert_db%>%filter(panel_joined_name%in%selected_panels)%>%
                 dplyr::select(gene_symbol,panel_joined_name))
@@ -111,7 +112,7 @@ summarize_panel_vs_phenotype_pubmed<-function(selected_panels,
   panel_vs_pubmed<-panel_vs_pubmed%>%
     summarize(n_panels=n())%>%
     mutate(n_panels_rate=n_panels/length(unique(panel_vs_pubmed$panel_joined_name)),
-           has_pub=pub_num>0)
+           has_pub=pub_num>=min_num_of_pub_to_consider_positive)
   return(panel_vs_pubmed)
 }
 
