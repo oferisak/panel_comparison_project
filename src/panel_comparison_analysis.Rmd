@@ -52,36 +52,11 @@ fixed_source_db<-fixed_source_db%>%filter(!(source%in%c('panelapp','clingen') & 
 
 gtr_db_panels_with_enough_genes<-gtr_db%>%count(panel_joined_name)%>%filter(n>=minimal_number_of_genes_in_panel)%>%pull(panel_joined_name)
 gtr_db<-gtr_db%>%filter(panel_joined_name%in%gtr_db_panels_with_enough_genes)
+# filter the tests list to match the filtered gtrdb file
+gtr_panels_list<-gtr_panels_list%>%filter(lab_test_id %in% gtr_db$panel_id)
 
 # define the minimal number of publications required to define gene-disease association
 min_num_of_pub_to_consider_positive<-2
-```
-
-# Source statistics
-
-```{r panel_stats,include=T,eval=T,message=F}
-source_stats<-get_source_stats(gtr_db)
-# Create a gt table based on preprocessed
-source_stats %>% arrange(desc(Panels))%>%
-  gt() %>%
-  tab_header(title = "Source comparison")%>%
-  fmt_number(columns = c(`Genes per panel`),suffixing = TRUE)
-
-gene_num_cat_table<-generate_gtr_gene_panel_cat_number_table(gtr_panels_list)
-gene_num_cat_table%>%
-  gt(rowname_col = 'name_of_laboratory') %>%
-   tab_spanner(
-    label = "Number of genes per panel",
-    columns = c(2:7)
-  )
-
-number_of_genes_per_panel<-gtr_db%>%group_by(panel_joined_name)%>%summarize(n=n())
-number_of_genes_per_panel_summary<-skimr::skim_without_charts(number_of_genes_per_panel$n)
-
-unique_sources<-gtr_db%>%pull(source)%>%unique()
-unique_panels<-gtr_db%>%pull(panel_joined_name)%>%unique()
-unique_panelapp_panels<-fixed_source_db%>%filter(source=='panelapp')%>%pull(panel_joined_name)%>%unique()
-
 ```
 
 Distance between panels was calculated using the Jaccard method. 
@@ -101,6 +76,7 @@ Distance between panels was calculated using the Jaccard method.
 
 # load dm data
 load('./data/pre_generated_data/manual_panels_data.Rdata')
+
 ```
 
 # Create a binary matrix of the GTR gene panels
@@ -125,6 +101,40 @@ load('./data/pre_generated_data/manual_panels_data.Rdata')
 load('./data/pre_generated_data/gtr_data.Rdata')
 ```
 
+# Source statistics
+
+```{r panel_stats,include=T,eval=T,message=F}
+
+#source_stats<-get_source_stats(gtr_db)
+
+# Get the years of the different tests
+## year created
+gtr_panels_list%>%count(year(test_create_date))
+## year updated
+gtr_panels_list%>%count(year(last_touch_date))
+## Country of origin
+gtr_panels_list%>%count(facility_country)%>%arrange(desc(n))
+
+# Total panels
+total_panels<-nrow(gtr_panels_list)
+# Number of countries
+ncountries<-gtr_panels_list%>%pull(facility_country)%>%unique()%>%length()
+# Number of panels updated after 2019
+npanels_after_2019<-gtr_panels_list%>%filter(year(last_touch_date)>=2019)%>%nrow()
+
+# number of genes per panel
+number_of_genes_per_panel<-gtr_db%>%group_by(panel_joined_name)%>%summarize(n=n())
+number_of_genes_per_panel_summary<-skimr::skim_without_charts(number_of_genes_per_panel$n)
+
+unique_sources<-gtr_db%>%pull(source)%>%unique()
+# number of unique sources
+n_unique_sources<-length(unique_sources)
+unique_panels<-gtr_db%>%pull(panel_joined_name)%>%unique()
+n_unique_panels<-length(unique_panels)
+unique_panelapp_panels<-fixed_source_db%>%filter(source=='panelapp')%>%pull(panel_joined_name)%>%unique()
+
+```
+
 # Define Selected panels
 
 ```{r selected_panels}
@@ -135,7 +145,7 @@ selected_phenotypes_panelapp<-c("panelapp|49|Hypertrophic cardiomyopathy - teen 
                                 'panelapp|657|Autism',
                                 'panelapp|126|Hearing loss',
                                 'panelapp|294|Ocular coloboma',
-                                'panelapp|309|Skeletal dysplasia',
+                                #'panelapp|309|Skeletal dysplasia',
                                 'panelapp|386|Pancreatitis',
                                 'panelapp|285|Intellectual disability',
                                 'panelapp|943|Osteopetrosis',
@@ -153,8 +163,9 @@ selected_phenotypes_panelapp<-c("panelapp|49|Hypertrophic cardiomyopathy - teen 
                                 'panelapp|65|Primary lymphoedema',
                                 'panelapp|92|Hypogonadotropic hypogonadism',
                                 'panelapp|1|Thoracic aortic aneurysm or dissection',
-                                'panelapp|526|Neuronal ceroid lipofuscinosis',
-                                'panelapp|551|Surfactant deficiency')
+                                'panelapp|526|Neuronal ceroid lipofuscinosis'
+                                #'panelapp|551|Surfactant deficiency'
+                                )
 selected_phenotypes<-c('hypertrophic cardiomyopathy',
                        'cholestasis',
                        'nephrolithiasis',
@@ -162,7 +173,7 @@ selected_phenotypes<-c('hypertrophic cardiomyopathy',
                        'autism',
                        'hearing loss',
                        'coloboma',
-                       'skeletal dysplasia',
+                       #'skeletal dysplasia',
                        'pancreatitis',
                        'intellectual disability',
                        'osteopetrosis',
@@ -180,36 +191,38 @@ selected_phenotypes<-c('hypertrophic cardiomyopathy',
                        'lymphedema',
                        'hypogonadotropic hypogonadism',
                        'aortic aneurysm',
-                       'neuronal ceroid lipofuscinosis',
-                       'surfactant deficiency')
+                       'neuronal ceroid lipofuscinosis'
+                       #'surfactant deficiency'
+                       )
 
-phenotype_queries<-c('hypertrophic.*cardiomyopathy|hcm|cardiomyopathy.*hypertrophic',
-                     'cholestasis',
-                     'nephrolithiasis|monogenic kidney stone',
-                     'hydrocephalus',
-                     'autism|autistic',
-                     'hearing loss|deafness',
-                     'coloboma',
-                     'skeletal.* dysplasia|dysplasia.*skeletal|osteo.*dysplas|dysplas*.osteo',
-                     'pancreatitis',
-                     'intellectual.*disability|mental.*retard|cognitive.*impair',
-                     'osteopetrosis',
-                     'ectodermal.*dysplasia|ectoderm|dysplasia.*ectoderm',
+phenotype_queries<-c('hypertrophic.*cardiomyopathy|hcm|cardiomyopathy.*hypertrophic|ICD10:I421|ICD10:I422',
+                     'cholestasis|ICD10:K831',
+                     'nephrolithiasis|monogenic kidney stone|ICD10:N200',
+                     'hydrocephalus|ICD10:G91',
+                     'autism|autistic|ICD10:F840',
+                     'hearing loss|deafness|ICD10:H93',
+                     'coloboma|ICD10:Q130',
+                     #'skeletal.* dysplasia|dysplasia.*skeletal|osteo.*dysplas|dysplas*.osteo|ICD10:Q78',
+                     'pancreatitis|ICD10:K85|ICD10:K861',
+                     'intellectual.*disability|mental.*retard|cognitive.*impair|ICD10:F7[012389]',
+                     'osteopetrosis|ICD10:782',
+                     'ectodermal.*dysplasia|ectoderm|dysplasia.*ectoderm|ICD10:Q824',
                      #'cystic.*renal|polycys.*kidn|renal.*cyst|renal*.ciliop|ciliop.*renal',
-                     'arthrogryposis',
-                     'holoprosencephaly',
+                     'arthrogryposis|ICD10:Q743',
+                     'holoprosencephaly|ICD10:Q042',
                      #'melanoma',
-                     'dilated.*cardio|dcm|cardiomyo.*dilated',
-                     'cornea.*dyst|dystr.*cornea',
-                     'ichthyosis',
-                     'lipodystrophy',
-                     'craniosynostosis',
-                     'arrhythmia',
-                     'lymphedema',
+                     'dilated.*cardio|dcm|cardiomyo.*dilated|ICD10:I420',
+                     'cornea.*dyst|dystr.*cornea|ICD10:H185',
+                     'ichthyosis|ICD10:Q80',
+                     'lipodystrophy|ICD10:E881',
+                     'craniosynostosis|ICD10:Q750',
+                     'arrhythmia|ICD10:I49|qt syndrome|brugada|fibrillation',
+                     'lymphedema|ICD10:I890',
                      'hypogonadism',
-                     'aort.*aneurysm|aneurysm.*aort',
-                     'lipofuscinosis',
-                     'surfactant')
+                     'aort.*aneurysm|aneurysm.*aort|ICD10:I71',
+                     'lipofuscinosis|ICD10:E754'
+                     #'surfactant'
+                     )
 
 
 selected_phenotypes_df<-data.frame(phenotype_name=selected_phenotypes,
@@ -217,7 +230,7 @@ selected_phenotypes_df<-data.frame(phenotype_name=selected_phenotypes,
                                    query=phenotype_queries)
 
 
-               
+selected_phenotypes_df<-selected_phenotypes_df
 ```
 
 # Analyze the selected panels 
@@ -261,7 +274,13 @@ for (selected_phenotype_name in selected_phenotypes){
   all_text<-c(all_text,phenotype_text)
   all_text_df<-all_text_df%>%bind_rows(phenotype_text_row)
 }
+
+
+
+
 write.table(data.frame(selected_phenotypes,discrepancy_text=all_text),file=glue('{analysis_dir}/discrepancy_text.tsv'),sep='\t',row.names = F,quote = F)
+all_text<-all_text
+all_text_df<-all_text_df
 
 # HCM discrepancy
 phenotype_name<-'hypertrophic cardiomyopathy'
@@ -299,15 +318,6 @@ panels_discrepancy_analysis(phenotype_name = phenotype_name,
 #load('./data/pre_generated_data/selected_phenotypes_analysis.RData')
 # now check the ranks for each 
 
-# Summarize the performance of panelapp vs naive
-methods_performance_metrics<-selected_phenotypes_analysis_df%>%
-  mutate(group=ifelse(grepl('^panelapp',group),'panelapp',group))%>%
-  filter(grepl('naive|panelapp$|max_dist|^panelapp',group))%>%
-  group_by(group)%>%
-  select(-c(ngenes,phenotype))%>%
-  pivot_longer(-c(group))%>%
-  group_by(group,name)%>%
-  summarize(skimr::skim_without_charts(value))
 ```
 
 # Sanity check- review panelapp genes not found in search
@@ -318,7 +328,7 @@ panelapp_genes_not_in_search<-NULL
 literature_genes_not_in_panelapp<-NULL
 for (selected_phenotype in selected_phenotypes){
   panelapp_genes<-selected_phenotypes_analysis[[selected_phenotype]]$panelapp_genes
-  all_genes_vs_phenotype<-pubmed_gene_list_vs_phenotype(phenotype_name = phenotype_name,
+  all_genes_vs_phenotype<-pubmed_gene_list_vs_phenotype(phenotype_name = selected_phenotype,
                                                         gene_list = all_genes,
                                                         pre_generated_genes_pubs = pre_generated_gene_publications_list)
   
@@ -340,62 +350,133 @@ names_to_hgnc<-data.frame(entrez_id=names(entrez_pubmed_res))%>%left_join(entrez
 '33414089' %in% entrez_pubmed_res[[entrez_to_hgnc%>%filter(symbol=='CYP27A1')%>%pull(entrez_id)]]
 ```
 
-# Disgenet
-
-it appears that disgenet db has stopped updating since 2020 and now has a paid version called disgenet plus
-i will therefore try and download other sources of gene-disease associations. 
-specifically - this looks promising:
-https://diseases.jensenlab.org/Downloads
-
-```{r disgenet}
-
-#save(disgenet_df,file = './data/pre_generated_data/disgenet_vs_all_genes.RData')
-load('./data/pre_generated_data/disgenet_vs_all_genes.RData')
-
-api_key<-get_dg_api_key()
-
-disgenet_vs_phenotype<-list()
-# now for each phenotype get the disgenet genes
-for (selected_phenotype in selected_phenotypes){
-  message(glue('Retrieving {selected_phenotype} genes from disgenet'))
-  phenotype_query<-selected_phenotypes_df%>%filter(phenotype_name==selected_phenotype)%>%pull(query)
-  disgenet_diseases<-grep(phenotype_query,disgenet_df$disease_name,ignore.case = T,value=T)
-  # dsi is a score for gene-disease specificity
-  disgenet_genes<-disgenet_df%>%filter(disease_name %in% disgenet_diseases)%>%
-    select(gene_symbol,score,ei,el)%>%
-    group_by(gene_symbol)%>%
-    slice_max(n=1,order_by=score)%>%
-    ungroup()
-  disgenet_vs_phenotype[[selected_phenotype]]<-disgenet_genes
-}
-
-
-```
-
 # Diseases db
+The files contain all links in the DISEASES database. All files start with the following four columns: gene identifier, gene name, disease identifier, and disease name. The knowledge files further contain the source database, the evidence type, and the confidence score. The experiments files instead contain the source database, the source score, and the confidence score. Finally, the textmining files contain the z-score, the confidence score, and a URL to a viewer of the underlying abstracts.
+
 ```{r diseases_db}
 #diseases_knowledge_db<-readr::read_delim('/media/SSD/Bioinformatics/Databases/diseases/human_disease_knowledge_full.tsv',col_names = c('gene_id','gene_symbol','disease_id','disease_name','source','evidence_type','confidence_score'))
-diseases_knowledge_db<-readr::read_delim('/media/SSD/Bioinformatics/Databases/diseases/human_disease_textmining_full.tsv',col_names = c('gene_id','gene_symbol','disease_id','disease_name','z_score', 'confidence_score','url'))
-all_diseases<-diseases_knowledge_db%>%pull(disease_name)%>%unique()
-head(diseases_knowledge_db)
 
-knowledge_vs_phenotype<-list()
+diseases_textmining_db<-readr::read_delim('/media/SSD/Bioinformatics/Databases/diseases/human_disease_textmining_full.tsv',col_names = c('gene_id','gene_symbol','disease_id','disease_name','z_score', 'confidence_score','url'))
+
+diseases_knowledge_db<-
+  readr::read_delim('/media/SSD/Bioinformatics/Databases/diseases/human_disease_knowledge_full.tsv',                             col_names = c('gene_id','gene_symbol','disease_id','disease_name','source','type','confidence_level'))
+
+
+# join the textmining and the knowledge db
+disease_count<-diseases_textmining_db%>%count(disease_name)
+diseases_db<-diseases_textmining_db%>%
+  filter(!disease_name%in%(disease_count%>%filter(n>10000)%>%pull(disease_name)))%>%
+  select(gene_symbol,disease_name,confidence_score,url)%>%
+  bind_rows(diseases_knowledge_db%>%
+              #filter(source%in%c('MedlinePlus','UniProtKB-KW'))%>%
+              mutate(confidence_score=confidence_level,
+                     url=source)%>%
+              select(gene_symbol,disease_name,confidence_score,url))
+  #filter(!grepl('ICD10:',disease_name))
+
+
+all_diseases<-diseases_db%>%pull(disease_name)%>%unique()
+
+ddb_vs_phenotype<-list()
 for (selected_phenotype in selected_phenotypes){
-  message(glue('Retrieving {selected_phenotype} genes from disgenet'))
+  message(glue('Retrieving {selected_phenotype} genes from diseases_db'))
   phenotype_query<-selected_phenotypes_df%>%filter(phenotype_name==selected_phenotype)%>%pull(query)
-  knowledge_diseases<-grep(phenotype_query,diseases_knowledge_db$disease_name,ignore.case = T,value=T)
-  # dsi is a score for gene-disease specificity
-  knowledge_gene<-diseases_knowledge_db%>%filter(disease_name %in% knowledge_diseases)%>%group_by(gene_symbol)%>%slice_max(n=1,order_by=confidence_score)
-  knowledge_vs_phenotype[[selected_phenotype]]<-knowledge_gene
+  ddb_pheno_diseases<-grep(phenotype_query,diseases_db$disease_name,ignore.case = T,value=T)%>%unique()
+  
+  ddb_genes<-diseases_db%>%
+    filter(disease_name %in% ddb_pheno_diseases)%>%
+    group_by(gene_symbol)%>%
+    slice_max(n=1,order_by=confidence_score,with_ties = F)
+  message(glue('found {nrow(ddb_genes)} genes with a confidence score associated with {selected_phenotype}'))
+  ddb_vs_phenotype[[selected_phenotype]]<-ddb_genes
 }
 
-z<-knowledge_vs_phenotype$`hypertrophic cardiomyopathy`
+# for each phenotype, check if there is a confidence score cutoff that includes all the panelapp panels
+pa_vs_ddb<-NULL
+all_lit<-NULL
+all_ddb<-NULL
+pa_genes<-NULL
+for (selected_phenotype in selected_phenotypes){
+  panelapp_genes<-selected_phenotypes_analysis[[selected_phenotype]]$panelapp_genes
+  pa_genes<-pa_genes%>%bind_rows(data.frame(phenotype_name=selected_phenotype,
+                                            gene_symbol=panelapp_genes))
+  all_genes_vs_phenotype<-pubmed_gene_list_vs_phenotype(phenotype_name = selected_phenotype,
+                                                        gene_list = all_genes,
+                                                        pre_generated_genes_pubs = pre_generated_gene_publications_list)
+  
+  
+  # panelapp vs diseases vs literature
+  pa_vs_ddb<-pa_vs_ddb%>%
+    bind_rows(data.frame(phenotype_name=selected_phenotype,gene_symbol=panelapp_genes)%>%
+                left_join(ddb_vs_phenotype[[selected_phenotype]])%>%
+                left_join(all_genes_vs_phenotype)
+      )
+  
+  # literature strat
+  all_lit<-all_lit%>%bind_rows(all_genes_vs_phenotype%>%filter(pub_num>0)%>%
+                                 mutate(phenotype_name=selected_phenotype,
+                                        is_panelapp=ifelse(gene_symbol%in%panelapp_genes,1,0)))
+  
+  # literature strat
+  all_ddb<-all_ddb%>%bind_rows(ddb_vs_phenotype[[selected_phenotype]]%>%
+                                 mutate(phenotype_name=selected_phenotype,
+                                        is_panelapp=ifelse(gene_symbol%in%panelapp_genes,1,0)))
+
+}
+
+# check literature search
+lit_vs_pa<-all_lit%>%
+  left_join(pa_genes%>%group_by(phenotype_name)%>%summarize(n_panelapp_genes=n()))%>%
+  group_by(phenotype_name,n_panelapp_genes)%>%
+  summarize(n=n(),
+            above_0_ppv=sum(ifelse(pub_num>=1 & is_panelapp==1,1,0))/sum(ifelse(pub_num>=1,1,0)),
+            above_1_ppv=sum(ifelse(pub_num>=2 & is_panelapp==1,1,0))/sum(ifelse(pub_num>=2,1,0)),
+            above_2_ppv=sum(ifelse(pub_num>=3 & is_panelapp==1,1,0))/sum(ifelse(pub_num>=3,1,0)),
+            above_0_sens=sum(ifelse(pub_num>=1 & is_panelapp==1,1,0)),
+            above_1_sens=sum(ifelse(pub_num>=2 & is_panelapp==1,1,0)),
+            above_2_sens=sum(ifelse(pub_num>=3 & is_panelapp==1,1,0)))%>%
+  mutate(above_0_sens=above_0_sens/n_panelapp_genes,
+         above_1_sens=above_1_sens/n_panelapp_genes,
+         above_2_sens=above_2_sens/n_panelapp_genes)
+  
+# ddb
+ddv_vs_pa<-all_ddb%>%
+  left_join(pa_genes%>%group_by(phenotype_name)%>%summarize(n_panelapp_genes=n()))%>%
+  group_by(phenotype_name,n_panelapp_genes)%>%
+  summarize(n=n(),
+            n_above_1=sum(ifelse(confidence_score>1,1,0)),
+            n_above_2=sum(ifelse(confidence_score>2,1,0)),
+            n_above_3=sum(ifelse(confidence_score>3,1,0)),
+            above_0_ppv=sum(ifelse(confidence_score>0 & is_panelapp==1,1,0))/sum(ifelse(confidence_score>0,1,0)),
+            above_1_ppv=sum(ifelse(confidence_score>=1 & is_panelapp==1,1,0))/sum(ifelse(confidence_score>=1,1,0)),
+            above_2_ppv=sum(ifelse(confidence_score>=2 & is_panelapp==1,1,0))/sum(ifelse(confidence_score>=2,1,0)),
+            above_3_ppv=sum(ifelse(confidence_score>=3 & is_panelapp==1,1,0))/sum(ifelse(confidence_score>=3,1,0)),
+            above_0_sens=sum(ifelse(confidence_score>0 & is_panelapp==1,1,0)),
+            above_1_sens=sum(ifelse(confidence_score>=1 & is_panelapp==1,1,0)),
+            above_2_sens=sum(ifelse(confidence_score>=2 & is_panelapp==1,1,0)),
+            above_3_sens=sum(ifelse(confidence_score>=3 & is_panelapp==1,1,0)))%>%
+  mutate(above_0_sens=above_0_sens/n_panelapp_genes,
+         above_1_sens=above_1_sens/n_panelapp_genes,
+         above_2_sens=above_2_sens/n_panelapp_genes,
+         above_3_sens=above_3_sens/n_panelapp_genes)
+
+# check for arthogryposis missing genes
+ag_pa_genes<-pa_genes%>%filter(phenotype_name=='ectodermal dysplasia')
+ag_pa_genes_in_diseases<-diseases_db%>%filter(gene_symbol%in%ag_pa_genes$gene_symbol)%>%
+  filter(grepl('ecto',disease_name,ignore.case = T))
+
+genes_not_in_ddb<-ag_pa_genes%>%filter(!(gene_symbol%in%ag_pa_genes_in_diseases$gene_symbol))
+their_relations<-diseases_db%>%filter(gene_symbol%in%genes_not_in_ddb$gene_symbol)
+diseases_db%>%filter(gene_symbol=='APCDD1')
+
 ```
+
+# Generate auto panels
 
 ```{r generate auto panels}
 auto_generator_panelapp_only<-list()
 auto_generator_panelapp_with_similar<-list()
-max_dists=c(0.85,0.9,0.95,0.99)
+max_dists=c(0.85,0.95,0.99)
 for (max_dist in max_dists){
   auto_generator_panelapp_only[[glue('max_dist={max_dist}')]]<-list()
   for (selected_phenotype_name in selected_phenotypes_df$phenotype_name){
@@ -422,7 +503,29 @@ for (max_dist in max_dists){
   }
 }
 
+# check the distribution of scores
+autopanel_scores<-NULL
+for (selected_phenotype in selected_phenotypes){
+  all_genes_vs_phenotype<-pubmed_gene_list_vs_phenotype(phenotype_name = selected_phenotype,
+                                                          gene_list = all_genes,
+                                                          pre_generated_genes_pubs = entrez_pubmed_res)
+  for (max_dist in max_dists){
+    all_genes_vs_phenotype<-all_genes_vs_phenotype%>%
+      mutate(has_pub=factor(ifelse(pub_num>=min_num_of_pub_to_consider_positive,1,0)))
+    pheno_scores<-all_genes_vs_phenotype%>%select(-pubmed_ids)%>%
+      left_join(data.frame(max_dist=max_dist,phenotype_name=selected_phenotype,auto_generator_panelapp_only[[max_dist]][[selected_phenotype]]))
+    autopanel_scores<-autopanel_scores%>%bind_rows(pheno_scores)
+  }
+}
 
+autopanel_scores%>%
+  filter(max_dist==0.85)%>%
+  select(phenotype_name,has_pub,num_o_panels,scaled_gene_score)%>%
+  pivot_longer(-c(phenotype_name,has_pub))%>%
+  ggplot(aes(x=value,fill=has_pub))+
+    geom_histogram(position='dodge')+
+  facet_grid(phenotype_name~name,scales='free')+
+  theme_minimal()
 
 ```
 
@@ -431,9 +534,9 @@ for (max_dist in max_dists){
 ```{r roc_analysis}
 
 # now add whether the gene is positive or not
-auto_generator_rocs<-NULL
-panelapp_roc<-NULL
-naive_roc<-NULL
+auto_generator_rocs_pubmed<-NULL
+panelapp_roc_pubmed<-NULL
+naive_roc_pubmed<-NULL
 
 for (selected_phenotype_name in selected_phenotypes_df$phenotype_name){
   panelapp_panel<-selected_phenotypes_df%>%filter(phenotype_name==selected_phenotype_name)%>%pull(panelapp_panel)
@@ -451,19 +554,21 @@ for (selected_phenotype_name in selected_phenotypes_df$phenotype_name){
       calculate_auto_generator_pr_for_phenotype(phenotype_name = selected_phenotype_name,
                                                 auto_generator_panel_res = auto_generator_panel_res,
                                                 all_genes_vs_phenotype = all_genes_vs_phenotype,
+                                                gen_source_db = gtr_with_expert_db,
                                                 score_column = 'scaled_gene_score')
-    auto_generator_rocs<-auto_generator_rocs%>%
+    auto_generator_rocs_pubmed<-auto_generator_rocs_pubmed%>%
       bind_rows(data.frame(phenotype_auto_generator_pr_curve,max_dist=max_dist)%>%
                   mutate(group=glue('ag_{max_dist}')))
     
-    phenotype_auto_generator_pr_curve <-
-      calculate_auto_generator_pr_for_phenotype(phenotype_name = selected_phenotype_name,
-                                                auto_generator_panel_res = auto_generator_panel_res,
-                                                all_genes_vs_phenotype = all_genes_vs_phenotype,
-                                                score_column = 'scaled_gene_score_exp')
-    auto_generator_rocs<-auto_generator_rocs%>%
-      bind_rows(data.frame(phenotype_auto_generator_pr_curve,max_dist=max_dist)%>%
-                  mutate(group=glue('ag_{max_dist}_modified')))
+    # phenotype_auto_generator_pr_curve <-
+    #   calculate_auto_generator_pr_for_phenotype(phenotype_name = selected_phenotype_name,
+    #                                             auto_generator_panel_res = auto_generator_panel_res,
+    #                                             all_genes_vs_phenotype = all_genes_vs_phenotype,
+    #                                             gen_source_db = gtr_with_expert_db,
+    #                                             score_column = 'scaled_gene_score_exp')
+    # auto_generator_rocs<-auto_generator_rocs%>%
+    #   bind_rows(data.frame(phenotype_auto_generator_pr_curve,max_dist=max_dist)%>%
+    #               mutate(group=glue('ag_{max_dist}_modified')))
     
   }
   
@@ -473,7 +578,7 @@ for (selected_phenotype_name in selected_phenotypes_df$phenotype_name){
                                          all_genes_vs_phenotype%>%filter(has_pub==1)%>%pull(gene_symbol),
                                          precision_recall_naming = T)
   
-  panelapp_roc<-panelapp_roc%>%
+  panelapp_roc_pubmed<-panelapp_roc_pubmed%>%
     bind_rows(data.frame(phenotype_name=selected_phenotype_name,
                          group='panelapp',
                          recall=panelapp_phenotype_pr$recall,
@@ -485,7 +590,7 @@ for (selected_phenotype_name in selected_phenotypes_df$phenotype_name){
   naive_phenotype_pr<-calculate_sens_and_ppv_vs_pubmed(naive_genes,
                                          all_genes_vs_phenotype%>%filter(has_pub==1)%>%pull(gene_symbol),
                                          precision_recall_naming = T)
-  naive_roc<-naive_roc%>%
+  naive_roc_pubmed<-naive_roc_pubmed%>%
     bind_rows(data.frame(phenotype_name=selected_phenotype_name,
                          group='naive search',
                          recall=naive_phenotype_pr$recall,
@@ -494,16 +599,115 @@ for (selected_phenotype_name in selected_phenotypes_df$phenotype_name){
   
 }
 
-all_aucs<-auto_generator_rocs%>%group_by(phenotype_name,group)%>%distinct(pr_auc)%>%
+all_aucs_pubmed<-auto_generator_rocs_pubmed%>%group_by(phenotype_name,group)%>%distinct(pr_auc)%>%
   ungroup()%>%group_by(group)%>%
   summarize(pr_auc=mean(pr_auc))
 
-all_rocs<-auto_generator_rocs%>%
-  bind_rows(panelapp_roc)%>%
-  bind_rows(naive_roc)
+all_rocs_pubmed<-auto_generator_rocs_pubmed%>%
+  bind_rows(panelapp_roc_pubmed)%>%
+  bind_rows(naive_roc_pubmed)
 
 # get the max f1 value per max dist per phenotype 
-all_rocs%>%
+all_rocs_pubmed%>%
+  group_by(phenotype_name,group)%>%
+  slice_max(n=1,order_by = f1,with_ties = F)%>%
+  ungroup()%>%
+  select(group,f1,precision,recall)%>%
+  pivot_longer(-group)%>%
+  ggplot(aes(x=group,y=value,fill=group,col=group))+
+  geom_boxplot(col='gray',alpha=0.2)+#coord_flip()+
+  geom_jitter(width = 0.1)+
+  #coord_flip()+
+  facet_wrap(name~.)+
+  guides(fill=F)+
+  ggsci::scale_fill_nejm()+ggsci::scale_color_nejm()+
+  theme_minimal()+
+  theme(legend.position = 'top')
+
+# compare rocs auto generator
+all_rocs_pubmed%>%
+  filter(grepl('ag_0.95',group))%>%
+  filter(!((.threshold==Inf) | (.threshold==0))) %>%
+  ggplot(aes(x=recall,y=precision,col=factor(group)))+
+  geom_line()+facet_wrap(phenotype_name~.)+
+  geom_abline(slope = -1,intercept = 1,linetype=2,alpha=0.5)+
+  geom_point(data=panelapp_roc_pubmed,inherit.aes = F,aes(x=recall,y=precision))+
+  geom_point(data=naive_roc_pubmed,inherit.aes = F,aes(x=recall,y=precision),col='red')+
+  #geom_point(data=comparison_metrics%>%filter(group=='distance_max_f1'),inherit.aes = F,aes(x=recall,y=precision),col='blue')+
+  #geom_point(data=dist_roc,inherit.aes = F,aes(x=recall,y=precision),col='blue')+
+  theme_minimal()+
+  scale_color_nejm()+
+  theme(legend.position = 'top')
+
+
+```
+
+# ROC analysis - vs textmining
+
+```{r roc_analysis}
+all_ddb_genes<-diseases_db%>%pull(gene_symbol)%>%unique()
+# now add whether the gene is positive or not
+auto_generator_rocs_ddb<-NULL
+panelapp_roc_ddb<-NULL
+naive_roc_ddb<-NULL
+confidence_score_thresh<-2
+
+for (selected_phenotype_name in selected_phenotypes_df$phenotype_name){
+  panelapp_panel<-selected_phenotypes_df%>%filter(phenotype_name==selected_phenotype_name)%>%pull(panelapp_panel)
+  all_genes_vs_phenotype<-data.frame(gene_symbol=all_genes)%>%
+    left_join(ddb_vs_phenotype[[selected_phenotype_name]])%>%
+    mutate(confidence_score=ifelse(is.na(confidence_score),0,confidence_score),
+           has_pub=factor(ifelse(confidence_score>=confidence_score_thresh,1,0)))
+  
+
+  # autogenerator rocs
+  for (max_dist in max_dists){
+    auto_generator_panel_res<-auto_generator_panelapp_only[[glue('max_dist={max_dist}')]][[selected_phenotype_name]]
+    phenotype_auto_generator_pr_curve <-
+      calculate_auto_generator_pr_for_phenotype(phenotype_name = selected_phenotype_name,
+                                                auto_generator_panel_res = auto_generator_panel_res,
+                                                all_genes_vs_phenotype = all_genes_vs_phenotype,
+                                                gen_source_db = gtr_with_expert_db,
+                                                score_column = 'scaled_gene_score')
+    auto_generator_rocs_ddb<-auto_generator_rocs_ddb%>%
+      bind_rows(data.frame(phenotype_auto_generator_pr_curve,max_dist=max_dist)%>%
+                  mutate(group=glue('ag_{max_dist}')))# MIND THAT IF THE AUTO GENERATOR ROC IS FOR MORE THAN ONE SCORE (INCLUDES THE MODIFIED) YOU NEED TO GIVE EACH SCORE A DIFFERENT GROUP NAME
+    
+  }
+  
+  # calculate the panelapp recall and precision
+  panelapp_genes<-gtr_with_expert_db%>%filter(panel_joined_name==panelapp_panel)%>%pull(gene_symbol)
+  panelapp_phenotype_pr<-calculate_sens_and_ppv_vs_pubmed(panelapp_genes,
+                                         all_genes_vs_phenotype%>%filter(has_pub==1)%>%pull(gene_symbol),
+                                         precision_recall_naming = T)
+  
+  panelapp_roc_ddb<-panelapp_roc_ddb%>%
+    bind_rows(data.frame(phenotype_name=selected_phenotype_name,
+                         group='panelapp',
+                         recall=panelapp_phenotype_pr$recall,
+                         precision=panelapp_phenotype_pr$precision,
+                         f1=panelapp_phenotype_pr$f1))
+  
+  # calculate the naive search (with panelapp) recall and precision
+  naive_genes<-selected_phenotypes_analysis[[selected_phenotype_name]]$naive_with_panelapp_genes
+  naive_phenotype_pr<-calculate_sens_and_ppv_vs_pubmed(naive_genes,
+                                         all_genes_vs_phenotype%>%filter(has_pub==1)%>%pull(gene_symbol),
+                                         precision_recall_naming = T)
+  naive_roc_ddb<-naive_roc_ddb%>%
+    bind_rows(data.frame(phenotype_name=selected_phenotype_name,
+                         group='naive search',
+                         recall=naive_phenotype_pr$recall,
+                         precision=naive_phenotype_pr$precision,
+                         f1=naive_phenotype_pr$f1))
+  
+}
+
+all_rocs_ddb<-auto_generator_rocs_ddb%>%
+  bind_rows(panelapp_roc_ddb)%>%
+  bind_rows(naive_roc_ddb)
+
+# get the max f1 value per max dist per phenotype 
+all_rocs_ddb%>%
   group_by(phenotype_name,group)%>%
   slice_max(n=1,order_by = f1,with_ties = F)%>%
   ungroup()%>%
@@ -514,24 +718,201 @@ all_rocs%>%
   facet_wrap(name~.)+
   guides(fill=F)+
   ggsci::scale_fill_nejm()+
-  theme_minimal()+
-  theme(legend.position = 'top')
+  theme_minimal()
 
-# compare rocs auto generator
-all_rocs%>%
-  filter(grepl('ag_0.85',group))%>%
+# compare rocs auto generator 
+all_rocs_ddb%>%
+  filter(group%in%c('ag_0.85'))%>%
   filter(!((.threshold==Inf) | (.threshold==0))) %>%
   ggplot(aes(x=recall,y=precision,col=factor(group)))+
   geom_line()+facet_wrap(phenotype_name~.)+
   geom_abline(slope = -1,intercept = 1,linetype=2,alpha=0.5)+
-  geom_point(data=panelapp_roc,inherit.aes = F,aes(x=recall,y=precision))+
-  geom_point(data=naive_roc,inherit.aes = F,aes(x=recall,y=precision),col='red')+
-  #geom_point(data=comparison_metrics%>%filter(group=='distance_max_f1'),inherit.aes = F,aes(x=recall,y=precision),col='blue')+
+  geom_point(data=panelapp_roc_ddb,inherit.aes = F,aes(x=recall,y=precision))+
+  geom_point(data=naive_roc_ddb,inherit.aes = F,aes(x=recall,y=precision),col='red')+
+  # geom_point(data=comparison_metrics%>%filter(group=='distance_max_f1'),inherit.aes = F,aes(x=recall,y=precision),col='blue')+
   #geom_point(data=dist_roc,inherit.aes = F,aes(x=recall,y=precision),col='blue')+
   theme_minimal()+
-  theme(legend.position = 'top')
+  scale_color_nejm()+
+  theme(legend.position = 'top',legend.text = element_text(size=12))
 
 
+```
+
+# Statistical analysis
+
+```{r ag_vs_pa_vs_ns}
+
+
+statistical_tests_data<-list()
+for (reference_source in c('pubmed','ddb')){
+  if (reference_source=='pubmed'){
+    auto_generator_rocs<-auto_generator_rocs_pubmed
+    panelapp_roc<-panelapp_roc_pubmed
+    naive_roc<-naive_roc_pubmed
+  }else{
+    auto_generator_rocs<-auto_generator_rocs_ddb
+    panelapp_roc<-panelapp_roc_ddb
+    naive_roc<-naive_roc_ddb
+  }
+  statistical_tests_data[[reference_source]]<-list()
+  for (selected_dist in max_dists){
+    statistical_tests_data[[reference_source]][[as.character(selected_dist)]]<-list()
+    message(glue('Running stats test for {reference_source} {selected_dist}'))
+    selected_ag_roc<-auto_generator_rocs%>%filter(!(!is.na(max_dist)&group!=glue('ag_{selected_dist}')))
+    
+    # add number of genes
+    library(listr)
+    auto_panels_genes<-auto_generator_panelapp_only[[glue('max_dist={selected_dist}')]] %>%list_name_to_df()%>%list_bind(selected_phenotypes)
+    auto_panels_genes<-auto_panels_genes[[1]]%>%select(phenotype_name=.group,gene_symbol,scaled_gene_score)
+    
+    # for each threshold calculate the number of genes
+    number_of_genes_above_thresh<-list()
+    for (selected_phenotype in selected_phenotypes){
+      message(glue('Adding number of genes per threshold for {selected_phenotype}'))
+      number_of_genes_above_thresh[[selected_phenotype]]<-NULL
+      phenotype_auto_panels<-auto_panels_genes%>%filter(phenotype_name==selected_phenotype)
+      threshs <- selected_ag_roc%>%filter(phenotype_name==selected_phenotype) %>% pull(.threshold)
+      for (thresh in threshs){
+        number_of_genes_above_thresh[[selected_phenotype]]<-
+          number_of_genes_above_thresh[[selected_phenotype]]%>%
+          bind_rows(data.frame(.threshold=thresh,
+                               ngenes=phenotype_auto_panels%>%filter(scaled_gene_score>=thresh)%>%nrow()))
+        
+      }
+    }
+    
+    # now flatten the list using listr
+    ngenes_to_add<-number_of_genes_above_thresh%>%list_name_to_df()%>%list_bind(selected_phenotypes)
+    ngenes_to_add<-ngenes_to_add[[1]]%>%rename(phenotype_name=.group)
+    
+    selected_ag_roc<-selected_ag_roc%>%
+      left_join(ngenes_to_add)
+    
+      
+    # flatten metrics for selected phenotypes
+    comparison_metrics<-panelapp_roc%>%bind_rows(naive_roc)
+    
+    panelapp_metrics<-panelapp_roc
+    
+    auto_matched_to_panelapp_by_precision<-selected_ag_roc%>%
+      filter(!is.infinite(.threshold))%>%
+      left_join(panelapp_metrics,by='phenotype_name')%>%
+      group_by(phenotype_name)%>%
+      # find the maximal recall value with precision equal or larger than panelapp
+      filter(precision.x>=(precision.y-0.05))%>%
+      #filter(abs(precision.x-precision.y)==min(abs(precision.x-precision.y)))%>%
+      slice_max(n=1,order_by=recall.x)%>%slice_max(n=1,order_by=precision.x)
+    
+    # now do the same for the naive search, but this time match by recall (in order to show better precision)
+    naive_metrics<-naive_roc
+    auto_matched_to_naive_by_recall<-selected_ag_roc%>%left_join(naive_metrics,by='phenotype_name')%>%
+      filter(.threshold>0)%>%
+      group_by(phenotype_name)%>%
+      #filter(abs(recall.x-recall.y)==min(abs(recall.x-recall.y)))%>%
+      filter(recall.x>=(recall.y-0.05))%>%
+      slice_max(n=1,order_by=precision.x)%>%slice_max(n=1,order_by=recall.x)
+    
+    
+    comparison_metrics<-
+      comparison_metrics%>%
+      # now add the max f1 for each phenotype
+      bind_rows(selected_ag_roc%>%group_by(phenotype_name)%>%
+                  slice_max(n=1,order_by = f1)%>%
+                  mutate(group='distance_max_f1')%>%
+                  select(-c(.threshold,max_dist)))%>%
+      # now add the max recall to the closest ppv
+      bind_rows(auto_matched_to_panelapp_by_precision%>%
+                  select(phenotype_name,ngenes=ngenes,group=group.x,f1=f1.x,precision=precision.x,recall=recall.x)%>%
+                  mutate(group='distance_matched_to_panelapp_percision'))%>%
+      # now add max precision to the closest recall
+      bind_rows(auto_matched_to_naive_by_recall%>%
+                  select(phenotype_name,ngenes=ngenes,group=group.x,f1=f1.x,precision=precision.x,recall=recall.x)%>%
+                  mutate(group='distance_matched_to_naive_recall'))
+    
+      
+      excluded_phenos<-c('melanoma')
+      comparison_metrics<-comparison_metrics%>%filter(!phenotype_name%in%excluded_phenos)
+      # plot max f1 vs panelapp vs naive
+      comparison_metrics%>%filter(!grepl('distance_(naive|panel)',group))%>%ggplot(aes(x=group,y=f1,fill=group))+
+        geom_col()+coord_flip()+
+        facet_grid(phenotype_name~.)+
+        guides(fill=F)+ggsci::scale_fill_nejm()+
+        theme_minimal()
+      
+      # Plot precision recall curves and mark the pr for panelapp and the naive search
+      selected_ag_roc%>%ggplot(aes(x=recall,y=precision,col=factor(group)))+
+        geom_line()+facet_wrap(phenotype_name~.)+
+        geom_abline(slope = -1,intercept = 1,linetype=2,alpha=0.5)+
+        geom_point(data=panelapp_roc,inherit.aes = F,aes(x=recall,y=precision))+
+        geom_point(data=naive_roc,inherit.aes = F,aes(x=recall,y=precision),col='red')+
+        geom_point(data=comparison_metrics%>%filter(group=='distance_max_f1'),inherit.aes = F,aes(x=recall,y=precision),col='blue')+
+        #geom_point(data=dist_roc,inherit.aes = F,aes(x=recall,y=precision),col='blue')+
+        theme_minimal()
+      
+      f1_comp<-comparison_metrics%>%ungroup()%>%select(phenotype_name,group,f1)%>%pivot_wider(names_from = group,values_from = f1)
+      recall_comp<-comparison_metrics%>%ungroup()%>%select(phenotype_name,group,recall)%>%pivot_wider(names_from = group,values_from = recall)
+      precision_comp<-comparison_metrics%>%ungroup()%>%select(phenotype_name,group,precision)%>%pivot_wider(names_from = group,values_from = precision)
+      
+      
+      
+      # calculate between group comparisons
+    
+      # but this works and seems more legit - you can do this for these comparisons
+      # distance f1 max vs panelapp f1
+      # distance precision matched recall vs panelapp recall - to show that for a given PPV level, sensitivity is better
+      # distance recall matched precision vs naive precision - to show that for a given sensitivity level, PPV is better
+      library(report)
+      precision_distance_vs_naive_recall_matched<-t.test(precision_comp%>%pull(distance_matched_to_naive_recall),precision_comp%>%pull(`naive search`),paired = T)
+      report(precision_distance_vs_naive_recall_matched)
+      precision_distance_vs_naive_recall_matched_df<-tidy(precision_distance_vs_naive_recall_matched)
+      # make sure the recall is indeed matched
+      distance_vs_naive_recall_diff_after_matching<-t.test(recall_comp%>%pull(distance_matched_to_naive_recall),recall_comp%>%pull(`naive search`),paired = T)
+      
+      precision_matched_recall_comp<-precision_comp%>%filter(panelapp-distance_matched_to_panelapp_percision<0.01)
+      recall_distance_vs_panelapp_precision_matched<-t.test(recall_comp%>%pull(distance_matched_to_panelapp_percision),recall_comp%>%pull(panelapp),paired = T)
+      report(recall_distance_vs_panelapp_precision_matched)
+      # make sure the precision is indeed matched
+      precision_comp%>%select(distance_matched_to_panelapp_percision,panelapp)%>%colMeans(na.rm = T)
+      distance_vs_panelapp_precision_diff_after_matching<-t.test(precision_comp%>%pull(distance_matched_to_panelapp_percision),precision_comp%>%pull(panelapp),paired = T)
+      
+      
+      f1_distance_vs_panelapp_max<-t.test(f1_comp%>%pull(distance_max_f1),f1_comp%>%pull(panelapp),paired = T)
+      report(f1_distance_vs_panelapp_max)
+      
+      f1_distance_vs_naive_max<-t.test(f1_comp%>%pull(distance_max_f1),f1_comp%>%pull(`naive search`),paired = T)
+      
+      report(f1_distance_vs_naive_max)
+      
+      # in cases where the precision was matched, check how many times the distance method achieved higher recall than panelapp
+      statistical_tests_data[[reference_source]][[as.character(selected_dist)]][['better_recall_vs_panelapp']] <-
+        recall_comp %>% filter(distance_matched_to_panelapp_percision > panelapp)
+      # in cases where the recall was matched, check how many times the distance method achieved higher precision than naive
+      statistical_tests_data[[reference_source]][[as.character(selected_dist)]][['better_precision_vs_naive']] <-
+        precision_comp %>% filter(distance_matched_to_naive_recall > `naive search`) 
+      
+      
+      statistical_tests_data[[reference_source]][[as.character(selected_dist)]][['f1_comp']]<-f1_comp
+      statistical_tests_data[[reference_source]][[as.character(selected_dist)]][['recall_comp']]<-recall_comp
+      statistical_tests_data[[reference_source]][[as.character(selected_dist)]][['precision_comp']]<-precision_comp
+      statistical_tests_data[[reference_source]][[as.character(selected_dist)]][['comparison_metrics']]<-comparison_metrics
+      statistical_tests_data[[reference_source]][[as.character(selected_dist)]][['precision_distance_vs_naive_recall_matched']]<-precision_distance_vs_naive_recall_matched
+      statistical_tests_data[[reference_source]][[as.character(selected_dist)]][['recall_distance_vs_panelapp_precision_matched']]<-recall_distance_vs_panelapp_precision_matched
+      statistical_tests_data[[reference_source]][[as.character(selected_dist)]][['f1_distance_vs_panelapp_max']]<-f1_distance_vs_panelapp_max
+      statistical_tests_data[[reference_source]][[as.character(selected_dist)]][['f1_distance_vs_naive_max']]<-f1_distance_vs_naive_max
+      statistical_tests_data[[reference_source]][[as.character(selected_dist)]][['distance_vs_panelapp_precision_diff_after_matching']]<-distance_vs_panelapp_precision_diff_after_matching
+      statistical_tests_data[[reference_source]][[as.character(selected_dist)]][['distance_vs_naive_recall_diff_after_matching']]<-distance_vs_naive_recall_diff_after_matching
+    }
+}
+
+
+```
+
+# Save results
+
+```{r save_results}
+elements_size<-data.frame(size=sort( sapply(ls(),function(x){object.size(get(x))})))
+elements_to_save<-elements_size%>%filter(size<20000000)%>%row.names()
+save(list=elements_to_save,file=glue('{analysis_dir}/workspace.RData'))
 ```
 
 # Machine learning method
@@ -664,188 +1045,6 @@ rf_testing_pred %>%
     size = 1.2
   )
 ```
-# ROC analysis - vs textmining
-
-```{r roc_analysis}
-
-# now add whether the gene is positive or not
-auto_generator_rocs<-NULL
-panelapp_roc<-NULL
-naive_roc<-NULL
-z_score_thresh<-4
-
-for (selected_phenotype_name in selected_phenotypes_df$phenotype_name){
-  panelapp_panel<-selected_phenotypes_df%>%filter(phenotype_name==selected_phenotype_name)%>%pull(panelapp_panel)
-  all_genes_vs_phenotype<-data.frame(gene_symbol=all_genes)%>%
-    left_join(knowledge_vs_phenotype[[selected_phenotype_name]])%>%
-    mutate(has_pub=factor(ifelse(z_score>=z_score_thresh,1,0)))
-  
-
-  # autogenerator rocs
-  for (max_dist in max_dists){
-    auto_generator_panel_res<-auto_generator_panelapp_only[[glue('max_dist={max_dist}')]][[selected_phenotype_name]]
-    phenotype_auto_generator_pr_curve <-
-      calculate_auto_generator_pr_for_phenotype(phenotype_name = selected_phenotype_name,
-                                                auto_generator_panel_res = auto_generator_panel_res,
-                                                all_genes_vs_phenotype = all_genes_vs_phenotype,
-                                                score_column = 'scaled_gene_score')
-    auto_generator_rocs<-auto_generator_rocs%>%
-      bind_rows(data.frame(phenotype_auto_generator_pr_curve,max_dist=max_dist)%>%
-                  mutate(group=glue('ag_{max_dist}')))# MIND THAT IF THE AUTO GENERATOR ROC IS FOR MORE THAN ONE SCORE (INCLUDES THE MODIFIED) YOU NEED TO GIVE EACH SCORE A DIFFERENT GROUP NAME
-    
-  }
-  
-  # calculate the panelapp recall and precision
-  panelapp_genes<-gtr_with_expert_db%>%filter(panel_joined_name==panelapp_panel)%>%pull(gene_symbol)
-  panelapp_phenotype_pr<-calculate_sens_and_ppv_vs_pubmed(panelapp_genes,
-                                         all_genes_vs_phenotype%>%filter(has_pub==1)%>%pull(gene_symbol),
-                                         precision_recall_naming = T)
-  
-  panelapp_roc<-panelapp_roc%>%
-    bind_rows(data.frame(phenotype_name=selected_phenotype_name,
-                         group='panelapp',
-                         recall=panelapp_phenotype_pr$recall,
-                         precision=panelapp_phenotype_pr$precision,
-                         f1=panelapp_phenotype_pr$f1))
-  
-  # calculate the naive search (with panelapp) recall and precision
-  naive_genes<-selected_phenotypes_analysis[[selected_phenotype_name]]$naive_with_panelapp_genes
-  naive_phenotype_pr<-calculate_sens_and_ppv_vs_pubmed(naive_genes,
-                                         all_genes_vs_phenotype%>%filter(has_pub==1)%>%pull(gene_symbol),
-                                         precision_recall_naming = T)
-  naive_roc<-naive_roc%>%
-    bind_rows(data.frame(phenotype_name=selected_phenotype_name,
-                         group='naive search',
-                         recall=naive_phenotype_pr$recall,
-                         precision=naive_phenotype_pr$precision,
-                         f1=naive_phenotype_pr$f1))
-  
-}
-
-all_rocs<-auto_generator_rocs%>%
-  bind_rows(panelapp_roc)%>%
-  bind_rows(naive_roc)
-
-# get the max f1 value per max dist per phenotype 
-all_rocs%>%
-  group_by(phenotype_name,group)%>%
-  slice_max(n=1,order_by = f1,with_ties = F)%>%
-  ungroup()%>%
-  select(group,f1,precision,recall)%>%
-  pivot_longer(-group)%>%
-  ggplot(aes(x=group,y=value,fill=group))+
-  geom_boxplot()+#coord_flip()+
-  facet_wrap(name~.)+
-  guides(fill=F)+
-  ggsci::scale_fill_nejm()+
-  theme_minimal()
-
-# compare rocs auto generator 
-all_rocs%>%filter(group%in%c('ag_0.85'))%>%
-  ggplot(aes(x=recall,y=precision,col=factor(group)))+
-  geom_line()+facet_wrap(phenotype_name~.)+
-  geom_abline(slope = -1,intercept = 1,linetype=2,alpha=0.5)+
-  geom_point(data=panelapp_roc,inherit.aes = F,aes(x=recall,y=precision))+
-  geom_point(data=naive_roc,inherit.aes = F,aes(x=recall,y=precision),col='red')+
-  # geom_point(data=comparison_metrics%>%filter(group=='distance_max_f1'),inherit.aes = F,aes(x=recall,y=precision),col='blue')+
-  #geom_point(data=dist_roc,inherit.aes = F,aes(x=recall,y=precision),col='blue')+
-  theme_minimal()
-
-```
-
-# compare selected auto generated roc against panelapp and naive
-
-```{r ag_vs_pa_vs_ns}
-
-# add the max f1 stats for all the panels to the metrics df
-selected_dist<-0.85
-selected_ag_roc<-auto_generator_rocs%>%filter(!(!is.na(max_dist)&group!=glue('ag_{selected_dist}')))
-
-# add number of genes
-library(listr)
-auto_panels_genes<-auto_generator_panelapp_only[[glue('max_dist={selected_dist}')]] %>%list_name_to_df()%>%list_bind(selected_phenotypes)
-auto_panels_genes<-auto_panels_genes[[1]]%>%select(phenotype_name=.group,gene_symbol,scaled_gene_score)
-
-# for each threshold calculate the number of genes
-number_of_genes_above_thresh<-list()
-for (selected_phenotype in selected_phenotypes){
-  message(glue('Adding number of genes per threshold for {selected_phenotype}'))
-  number_of_genes_above_thresh[[selected_phenotype]]<-NULL
-  phenotype_auto_panels<-auto_panels_genes%>%filter(phenotype_name==selected_phenotype)
-  threshs <- selected_ag_roc%>%filter(phenotype_name==selected_phenotype) %>% pull(.threshold)
-  for (thresh in threshs){
-    number_of_genes_above_thresh[[selected_phenotype]]<-
-      number_of_genes_above_thresh[[selected_phenotype]]%>%
-      bind_rows(data.frame(.threshold=thresh,
-                           ngenes=phenotype_auto_panels%>%filter(scaled_gene_score>=thresh)%>%nrow()))
-    
-  }
-}
-
-# now flatten the list using listr
-ngenes_to_add<-number_of_genes_above_thresh%>%list_name_to_df()%>%list_bind(selected_phenotypes)
-ngenes_to_add<-ngenes_to_add[[1]]%>%rename(phenotype_name=.group)
-
-selected_ag_roc<-selected_ag_roc%>%
-  left_join(ngenes_to_add)
-
-
-comparison_metrics<-selected_phenotypes_analysis_df%>%
-  select(-contains('rank'))%>%
-  filter(grepl('panelapp|naive',group),!grepl('no panelapp',group))%>%
-  mutate(group=ifelse(group!='panelapp','naive',group))%>%
-  rename(phenotype_name=phenotype)
-
-panelapp_metrics<-comparison_metrics%>%filter(grepl('^panelapp',group))
-auto_matched_to_panelapp_by_precision<-selected_ag_roc%>%left_join(panelapp_metrics,by='phenotype_name')%>%
-  group_by(phenotype_name)%>%
-  filter(abs(precision.x-precision.y)==min(abs(precision.x-precision.y)))%>%
-  slice_max(n=1,order_by=recall.x)
-
-# now do the same for the naive search, but this time match by recall (in order to show better precision)
-naive_metrics<-comparison_metrics%>%filter(grepl('naive',group))
-auto_matched_to_naive_by_recall<-selected_ag_roc%>%left_join(naive_metrics,by='phenotype_name')%>%
-  group_by(phenotype_name)%>%
-  filter(abs(recall.x-recall.y)==min(abs(recall.x-recall.y)))%>%
-  slice_max(n=1,order_by=precision.x)
-
-
-comparison_metrics<-
-  comparison_metrics%>%
-  # now add the max f1 for each phenotype
-  bind_rows(selected_ag_roc%>%group_by(phenotype_name)%>%
-              slice_max(n=1,order_by = f1)%>%
-              mutate(group='distance_max_f1')%>%
-              select(-c(.threshold,max_dist)))%>%
-  # now add the max recall to the closest ppv
-  bind_rows(auto_matched_to_panelapp_by_precision%>%
-              select(phenotype_name,ngenes=ngenes.x,group=group.x,f1=f1.x,precision=precision.x,recall=recall.x)%>%
-              mutate(group='distance_matched_to_panelapp_percision'))%>%
-  # now add max precision to the closest recall
-  bind_rows(auto_matched_to_naive_by_recall%>%
-              select(phenotype_name,ngenes=ngenes.x,group=group.x,f1=f1.x,precision=precision.x,recall=recall.x)%>%
-              mutate(group='distance_matched_to_naive_recall'))
-
-
-excluded_phenos<-c('melanoma')
-comparison_metrics<-comparison_metrics%>%filter(!phenotype_name%in%excluded_phenos)
-# plot max f1 vs panelapp vs naive
-comparison_metrics%>%filter(!grepl('distance_(naive|panel)',group))%>%ggplot(aes(x=group,y=f1,fill=group))+
-  geom_col()+coord_flip()+
-  facet_grid(phenotype_name~.)+
-  guides(fill=F)+ggsci::scale_fill_nejm()+
-  theme_minimal()
-
-# Plot precision recall curves and mark the pr for panelapp and the naive search
-selected_ag_roc%>%ggplot(aes(x=recall,y=precision,col=factor(group)))+
-  geom_line()+facet_wrap(phenotype_name~.)+
-  geom_abline(slope = -1,intercept = 1,linetype=2,alpha=0.5)+
-  geom_point(data=panelapp_roc,inherit.aes = F,aes(x=recall,y=precision))+
-  geom_point(data=naive_roc,inherit.aes = F,aes(x=recall,y=precision),col='red')+
-  geom_point(data=comparison_metrics%>%filter(group=='distance_max_f1'),inherit.aes = F,aes(x=recall,y=precision),col='blue')+
-  #geom_point(data=dist_roc,inherit.aes = F,aes(x=recall,y=precision),col='blue')+
-  theme_minimal()
-```
 
 # Compare vs clingen
 
@@ -887,124 +1086,8 @@ comparison_metrics_text<-comparison_metrics_summary%>%group_by(group,skim_variab
 
 ```
 
-# Statistical analysis
-
-```{r statistical_analysis}
-f1_comp<-comparison_metrics%>%ungroup()%>%select(phenotype_name,group,f1)%>%pivot_wider(names_from = group,values_from = f1)
-recall_comp<-comparison_metrics%>%ungroup()%>%select(phenotype_name,group,recall)%>%pivot_wider(names_from = group,values_from = recall)
-precision_comp<-comparison_metrics%>%ungroup()%>%select(phenotype_name,group,precision)%>%pivot_wider(names_from = group,values_from = precision)
-
-# in cases where the precision was matched, check how many times the distance method achieved higher recall than panelapp
-better_recall_vs_panelapp <-
-  recall_comp %>% filter(distance_matched_to_panelapp_percision > panelapp) %>%
-  filter(phenotype_name %in% (precision_comp %>% filter(abs(distance_matched_to_panelapp_percision -
-                                                             panelapp) < 0.05) %>% pull(phenotype_name)))
-# in cases where the recall was matched, check how many times the distance method achieved higher precision than naive
-better_precision_vs_naive <-
-  precision_comp %>% filter(distance_matched_to_naive_recall > naive) %>%
-  filter(phenotype_name %in% (recall_comp %>% filter(abs(distance_matched_to_naive_recall -
-                                                             naive) < 0.05) %>% pull(phenotype_name)))
-
-comparison_text<-paste0(glue('Compared to a literature search, PanelApp panels demonstrated '),
-                        paste0(comparison_metrics_text%>%filter(group=='panelapp')%>%pull(metric_text), 
-                        collapse=', '),
-                        glue('. The unified panels based on naive search demonstrated '),
-                        paste0(comparison_metrics_text%>%filter(group=='naive')%>%pull(metric_text), 
-                        collapse=', '),
-                        glue('. Distance based generated panels demonstrated '),
-                        paste0(comparison_metrics_text%>%filter(group=='distance_max_f1')%>%pull(metric_text), 
-                        collapse=', '),
-                        glue('. For {nrow(f1_comp%>%filter(distance_max_f1>panelapp))}/{nrow(f1_comp)} ({round(100*nrow(f1_comp%>%filter(distance_max_f1>panelapp))/nrow(f1_comp),1)}%) of the phenotypes, the distance based panel achieved a higher F1 score compared to the PanelApp panel'),
-                        glue('. For {nrow(better_recall_vs_panelapp)}/{nrow(recall_comp)} ({round(100*nrow(better_recall_vs_panelapp)/nrow(recall_comp),1)}%) of the phenotypes, the distance based panel achieved a higher sensitivity compared to the PanelApp panel while maintaining a comparable PPV'),
-                        glue('. For {nrow(f1_comp%>%filter(distance_max_f1>naive))}/{nrow(f1_comp)} ({round(100*nrow(f1_comp%>%filter(distance_max_f1>naive))/nrow(f1_comp),1)}%) of the phenotypes, the distance based panel achieved a higher F1 score compared to the naive search panel'),
-                        glue('. For {nrow(better_precision_vs_naive)}/{nrow(recall_comp)} ({round(100*nrow(better_precision_vs_naive)/nrow(recall_comp),1)}%) of the phenotypes, the distance based panel achieved a higher PPV compared to the naive search panel while maintaining a comparable sensitivity'),
-                        coollapse=' ') 
-comparison_text
-# calculate between group comparisons
-params_list <- combn(unique(comparison_metrics$group), 2, FUN = list)
-
-# for some reason this doesnt work
-# # perform t test for each combination
-# model_t <- map(.x = params_list,
-#                .f = ~ tidy(t.test(
-#                  formula = recall ~ group,
-#                  paired=F,
-#                  data    = subset(comparison_metrics%>%filter(!(phenotype_name %in% c('cleft lip palate'))), group %in% .x),
-#                  conf.int=T
-#                )))
-# names(model_t)<-params_list
-# model_t
-
-# but this works and seems more legit - you can do this for these comparisons
-# distance f1 max vs panelapp f1
-# distance precision matched recall vs panelapp recall - to show that for a given PPV level, sensitivity is better
-# distance recall matched precision vs naive precision - to show that for a given sensitivity level, PPV is better
-library(report)
-precision_distance_vs_naive_recall_matched<-t.test(precision_comp%>%pull(distance_matched_to_naive_recall),precision_comp%>%pull(naive),paired = T)
-report(precision_distance_vs_naive_recall_matched)
-precision_distance_vs_naive_recall_matched_df<-tidy(precision_distance_vs_naive_recall_matched)
-# make sure the recall is indeed matched
-t.test(recall_comp%>%pull(distance_matched_to_naive_recall),recall_comp%>%pull(naive),paired = T)
-
-precision_matched_recall_comp<-precision_comp%>%filter(panelapp-distance_matched_to_panelapp_percision<0.01)
-recall_distance_vs_panelapp_precision_matched<-t.test(recall_comp%>%pull(distance_matched_to_panelapp_percision),recall_comp%>%pull(panelapp),paired = T)
-report(recall_distance_vs_panelapp_precision_matched)
-# make sure the precision is indeed matched
-precision_comp%>%select(distance_matched_to_panelapp_percision,panelapp)%>%colMeans()
-t.test(precision_comp%>%pull(distance_matched_to_panelapp_percision),precision_comp%>%pull(panelapp),paired = T)
 
 
-f1_distance_vs_panelapp_max<-t.test(f1_comp%>%pull(distance_max_f1),f1_comp%>%pull(panelapp),paired = T)
-report(f1_distance_vs_panelapp_max)
-
-f1_distance_vs_naive_max<-t.test(f1_comp%>%pull(distance_max_f1),f1_comp%>%pull(naive),paired = T)
-
-report(f1_distance_vs_naive_max)
-
-```
-
-# Summary text
-
-```{r summary_text}
-# Source summary text
-source_summary_text<-paste0(glue('After exclusion, a total of {length(unique_panels)} panels from {length(unique_sources)} different vendors were collected from the GTR and {length(unique_panelapp_panels)} panels were collected from PanelApp.'),
-                            glue('The median number of genes per panel was {number_of_genes_per_panel_summary$numeric.p25} (IQR[{number_of_genes_per_panel_summary$numeric.p50},{number_of_genes_per_panel_summary$numeric.p75}])'),
-                            collapse=' ')
-
-source_summary_text
-
-# Summarize the selected phenotypes
-selected_phenotypes_summary_text<-paste0(glue('In order to demonstrate the discrepancy between available panels, and the utility of our method, {nrow(selected_phenotypes_df)} phenotypes were selected: {paste0("(",seq(1,20),") ",selected_phenotypes,collapse=", ")}.'),
-                                         collapse=' ')
-selected_phenotypes_summary_text   
-
-# Discrepancy throughout selected panels
-percent_of_genes_in_less_than_10pct_of_panels_df<-NULL
-for (selected_phenotype_name in selected_phenotypes){
-  relatedness_df<-selected_phenotypes_analysis[[selected_phenotype_name]]$naive_discrepancy$relatedness
-  percent_of_genes_in_less_than_10pct_of_panels<-relatedness_df$percent_of_panels%>%filter(percent_of_panels_cat=='0-10%')%>%pull(rate)
-  if (length(percent_of_genes_in_less_than_10pct_of_panels)==0){percent_of_genes_in_less_than_10pct_of_panels<-0}
-  percent_of_genes_in_less_than_10pct_of_panels_df<-percent_of_genes_in_less_than_10pct_of_panels_df%>%
-    bind_rows(data.frame(phenotype_name=selected_phenotype_name,
-                         num_of_panels=relatedness_df$num_of_panels,
-                         percent_of_genes_in_less_than_10pct_of_panels))
-}
-num_o_panels_summary<-skimr::skim_without_charts(percent_of_genes_in_less_than_10pct_of_panels_df$num_of_panels)
-
-percent_less_than_10_summary<-skimr::skim_without_charts(percent_of_genes_in_less_than_10pct_of_panels_df$percent_of_genes_in_less_than_10pct_of_panels*100)
-
-discrepancy_text<-paste0(glue('For the selected phenotypes, a naive search identified, on average, {round(num_o_panels_summary$numeric.mean,1)} panels per phenotype (IQR [{num_o_panels_summary$numeric.p25},{num_o_panels_summary$numeric.p75}]).'),
-                         glue('For most phenotypes, the majority of the genes ({round(percent_less_than_10_summary$numeric.mean,1)}% of genes) IQR[{round(percent_less_than_10_summary$numeric.p25,1)}%,{round(percent_less_than_10_summary$numeric.p75,1)}%] were found in less than 10% of the collected panels.'),
-                         collapse=' ')
-discrepancy_text
-
-# Literature text
-comparison_metrics_summary<-comparison_metrics%>%
-  group_by(group)%>%select(precision,recall,f1)%>%skimr::skim_without_charts()
-
-comparison_metrics_text<-comparison_metrics_summary%>%group_by(group,skim_variable)%>%
-  summarize(metric_text=glue('a mean {skim_variable} of {round(numeric.mean,2)} (IQR[{round(numeric.p25,2)},{round(numeric.p75,2)}])'))
-```
 
 
 
@@ -1620,6 +1703,39 @@ panelapp_panels_dist%>%filter(n_genes<1000)%>%ggplot(aes(x=n_genes,y=min_dist))+
   geom_point()+
   theme_minimal()
 
+
+
+```
+
+
+# Disgenet
+
+it appears that disgenet db has stopped updating since 2020 and now has a paid version called disgenet plus
+i will therefore try and download other sources of gene-disease associations. 
+specifically - this looks promising:
+https://diseases.jensenlab.org/Downloads
+
+```{r disgenet}
+
+#save(disgenet_df,file = './data/pre_generated_data/disgenet_vs_all_genes.RData')
+load('./data/pre_generated_data/disgenet_vs_all_genes.RData')
+
+api_key<-get_dg_api_key()
+
+disgenet_vs_phenotype<-list()
+# now for each phenotype get the disgenet genes
+for (selected_phenotype in selected_phenotypes){
+  message(glue('Retrieving {selected_phenotype} genes from disgenet'))
+  phenotype_query<-selected_phenotypes_df%>%filter(phenotype_name==selected_phenotype)%>%pull(query)
+  disgenet_diseases<-grep(phenotype_query,disgenet_df$disease_name,ignore.case = T,value=T)
+  # dsi is a score for gene-disease specificity
+  disgenet_genes<-disgenet_df%>%filter(disease_name %in% disgenet_diseases)%>%
+    select(gene_symbol,score,ei,el)%>%
+    group_by(gene_symbol)%>%
+    slice_max(n=1,order_by=score)%>%
+    ungroup()
+  disgenet_vs_phenotype[[selected_phenotype]]<-disgenet_genes
+}
 
 
 ```

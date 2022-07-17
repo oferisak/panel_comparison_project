@@ -1,5 +1,6 @@
 
-generate_panel_from_panels<-function(joined_panel_names,gen_source_db,gen_dm_df,max_distance=1,with_mitochondrial=F){
+generate_panel_from_panels<-function(joined_panel_names,gen_source_db,gen_dm_df,max_distance=1,with_mitochondrial=F,
+                                     original_panel_max_score=T){
   panels_per_gene<-gen_source_db%>%group_by(gene_symbol)%>%summarize(number_of_panels_with_gene=n())%>%ungroup()
   number_of_genes_per_panel<-gen_source_db%>%group_by(panel_joined_name)%>%summarize(number_of_genes=n())%>%ungroup()
   # first tier similar panels
@@ -23,7 +24,7 @@ generate_panel_from_panels<-function(joined_panel_names,gen_source_db,gen_dm_df,
     left_join(similar_panels_df%>%
                 select(col,dist,number_of_genes)%>%
                 rename('panel_joined_name'=col))%>%
-    mutate(gene_score=1-dist,
+    mutate(gene_score=1-dist^2,
            panel_dist=dist)%>%
     group_by(gene_symbol)%>%
     summarize(num_o_panels =n(),
@@ -38,6 +39,10 @@ generate_panel_from_panels<-function(joined_panel_names,gen_source_db,gen_dm_df,
   
   genes_in_original_panels<-gen_source_db%>%filter(panel_joined_name%in%joined_panel_names)%>%pull(gene_symbol)%>%unique()
   gene_rank$in_original_panels<-ifelse(gene_rank$gene_symbol %in% genes_in_original_panels,1,0)
+  
+  # if the gene is in the original panel and the original_panel_max_score flag is T change its score to be the max score
+  gene_rank<-gene_rank%>%
+    mutate(gene_score=ifelse(original_panel_max_score & in_original_panels,max(gene_score),gene_score))
   
   # now adjust for number of panels per gene
   gene_rank<-gene_rank%>%left_join(panels_per_gene)%>%
@@ -63,6 +68,7 @@ generate_panel_from_panels<-function(joined_panel_names,gen_source_db,gen_dm_df,
 calculate_auto_generator_pr_for_phenotype<-function(phenotype_name,
                                                     auto_generator_panel_res,
                                                     all_genes_vs_phenotype,
+                                                    gen_source_db,
                                                     score_column='scaled_gene_score'){
   panels_per_gene<-gen_source_db%>%group_by(gene_symbol)%>%summarize(number_of_panels_with_gene=n())%>%ungroup()
   table_for_roc_panelapp_only<-all_genes_vs_phenotype%>%
@@ -78,6 +84,7 @@ calculate_auto_generator_pr_for_phenotype<-function(phenotype_name,
            median_panel_dist=ifelse(is.na(median_panel_dist),1,median_panel_dist),
            mean_panel_dist=ifelse(is.na(mean_panel_dist),1,mean_panel_dist),
            )
+
     # add a modified gene score - if you want to test other options
     # mutate(gene_score_modified=ifelse(!is.na(in_original_panels)&(in_original_panels),scaled_adjusted_gene_score+5,scaled_adjusted_gene_score))
   

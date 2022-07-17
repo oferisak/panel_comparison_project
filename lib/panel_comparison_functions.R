@@ -267,12 +267,15 @@ get_relatedness_summary_text<-function(phenotype_name,
                                        min_num_of_pub_to_consider_positive=2){
   relatedness_summary<-list()
   genes_in_top_0.9_panels<-phenotype_relatedness$panels_per_gene%>%filter(npanels_rate>=0.9)%>%pull(gene_symbol)
+  genes_in_bottom_0.1_panels<-phenotype_relatedness$panels_per_gene%>%filter(npanels_rate<=0.1)%>%pull(gene_symbol)
   #genes_in_top_0.9_panels<-phenotype_relatedness$percent_of_panels%>%filter(percent_of_panels_cat=="90-100%")%>%pull(n)
   num_genes_in_top_0.9_panels<-length(genes_in_top_0.9_panels)
+  num_genes_in_bottom_0.1_panels<-length(genes_in_bottom_0.1_panels)
   perc_genes_in_top_0.9_panels<-round(num_genes_in_top_0.9_panels/phenotype_relatedness$num_of_genes*100,1)
+  perc_genes_in_bottom_0.1_panels<-round(num_genes_in_bottom_0.1_panels/phenotype_relatedness$num_of_genes*100,1)
   relatedness_text<-paste0(glue('For {phenotype_name}, we found {phenotype_relatedness$num_of_panels} panels in the GTR with {phenotype_relatedness$num_of_genes} genes (median {phenotype_relatedness$genes_per_panel$numeric.p50} genes, range [{phenotype_relatedness$genes_per_panel$numeric.p0},{phenotype_relatedness$genes_per_panel$numeric.p100}]).'),
                            glue('Out of the list of genes, only {num_genes_in_top_0.9_panels} genes ({perc_genes_in_top_0.9_panels}%) were found in more than 90% of the panels ({paste0(genes_in_top_0.9_panels,collapse=", ")}).'),
-                           glue('There were {phenotype_relatedness$percent_of_panels%>%filter(percent_of_panels_cat=="0-10%")%>%pull(n)} genes ({round(phenotype_relatedness$percent_of_panels%>%filter(percent_of_panels_cat=="0-10%")%>%pull(rate)*100,1)}%) that were found in less than 10% of the panels.'),
+                           glue('There were {num_genes_in_bottom_0.1_panels} genes ({perc_genes_in_bottom_0.1_panels}%) that were found in less than 10% of the panels.'),
                            collapse=' ')
   relatedness_table<-data.frame(phenotype_name=phenotype_name,
                                 num_of_panels=phenotype_relatedness$num_of_panels,
@@ -281,7 +284,9 @@ get_relatedness_summary_text<-function(phenotype_name,
                                 num_of_genes_max=phenotype_relatedness$genes_per_panel$numeric.p100,
                                 num_genes_in_top_0.9_panels=num_genes_in_top_0.9_panels,
                                 genes_in_top_0.9_panels=paste0(genes_in_top_0.9_panels,collapse=','),
-                                perc_genes_in_top_0.9_panels=perc_genes_in_top_0.9_panels)
+                                perc_genes_in_top_0.9_panels=perc_genes_in_top_0.9_panels,
+                                num_genes_in_bottom_0.1_panels=num_genes_in_bottom_0.1_panels,
+                                perc_genes_in_bottom_0.1_panels=perc_genes_in_bottom_0.1_panels)
   if (!is.na(phenotype_distance_summary)){
     relatedness_text<-paste0(relatedness_text,
                              glue('The average distance between the panels was {phenotype_distance_summary$numeric.mean} (IQR [{phenotype_distance_summary$numeric.p25},{phenotype_distance_summary$numeric.p75}])'),
