@@ -232,13 +232,7 @@ get_panel_relatedness_stats <- function(panel_names,gtr_with_expert_db,panel_to_
     mutate(percent_of_panels_cat=cut(percent_of_panels,breaks=seq(0,1,0.1),labels=c('0-10%','10-20%','20-30%','30-40%','40-50%','50-60%','60-70%','70-80%','80-90%','90-100%')))
   relatedness_stats$percent_of_panels<-per_gene_stats%>%group_by(percent_of_panels_cat)%>%
     summarize(n=n(),rate=n/relatedness_stats$num_of_genes)
-  # generate a plot for the number of genes vs percent of panels
-  # relatedness_stats$gene_percent_plot<-
-  #   per_gene_stats%>%
-  #   ggplot(aes(x=percent_of_panels_cat))+
-  #   geom_bar()+
-  #   labs(y='Number of genes',x='Percent of panels')+
-  #   theme_minimal()
+
   if (!is.na(panel_to_compare)){
     # check what is the status only for the genes in the panel to compare
     relatedness_stats$panel_to_compare<-panel_to_compare

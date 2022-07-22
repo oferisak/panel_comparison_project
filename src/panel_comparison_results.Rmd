@@ -1,0 +1,392 @@
+---
+title: "panel_comparison_results"
+author: "Ofer Isakov"
+date: "7/10/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,include=F,eval=F,message = F,warning=F)
+results_ouput_folder<-'/media/SSD/Bioinformatics/Projects/gene_panel_generator_202108/panel_comparison_project/output/panel_comparison_analysis_2022-07-21/'
+
+library(glue)
+library(tidyverse)
+library(report)
+library(gghalves)
+library(ggsci)
+
+load(glue('{results_ouput_folder}/workspace.RData'))
+```
+
+```{r render_report,eval=F,echo=F}
+library(rmarkdown)
+output_dir <- results_ouput_folder
+render('/media/SSD/Bioinformatics/Projects/gene_panel_generator_202108/panel_comparison_project/src/panel_comparison_results.Rmd', output_dir = output_dir,output_file = sprintf('panel_comparison_results.%s.html',Sys.Date()),quiet = F)
+```
+
+# Results
+
+### Panel Discrepancy
+
+```{r source_summary,include=T,eval=T}
+
+source_summary_text<-paste0(glue('After exclusion, a total of {n_unique_panels} panels from {n_unique_sources} different vendors and {ncountries} countries were collected from the GTR. '),
+                            glue('The majority of the panels ({round(100*npanels_after_2019/n_unique_panels,1)}%) were updated at least once since 2019. '),
+                            glue('Additionally, {length(unique_panelapp_panels)} panels were collected from PanelApp. '),
+                            glue('The median number of genes per panel was {number_of_genes_per_panel_summary$numeric.p25} (IQR[{number_of_genes_per_panel_summary$numeric.p50},{number_of_genes_per_panel_summary$numeric.p75}])'),
+                            collapse=' ')
+
+cat(source_summary_text)
+
+# Summarize the selected phenotypes
+selected_phenotypes_summary_text<-paste0(c(glue('In order to demonstrate the discrepancy between available panels, and the utility of our method, {nrow(selected_phenotypes_df)} phenotypes were selected: {paste0("(",seq(1,nrow(selected_phenotypes_df)),") ",selected_phenotypes,collapse=", ")}.'),
+                                           'For each phenotype, matching GTR panels were identified using a text-based search. We then analyzed inter panel discrepancy for each phenotype.'),
+                                         collapse=' ')
+cat(selected_phenotypes_summary_text)   
+
+# Discrepancy throughout selected panels
+# add a summary of all the phenotypes together
+#colnames(all_text_df)
+npanels_skim<-skimr::skim_without_charts(all_text_df$num_of_panels)
+ngenes_bot_0.1_skim<-skimr::skim_without_charts(all_text_df$perc_genes_in_bottom_0.1_panels)
+
+discrepancy_text<-paste0(c(glue('For the selected phenotypes, a naive search identified, on average, {round(npanels_skim$numeric.mean,1)} different panels per phenotype (IQR [{npanels_skim$numeric.p25},{npanels_skim$numeric.p75}]).'),
+                         glue('On average, for each phenotype, nearly half of the genes ({round(ngenes_bot_0.1_skim$numeric.mean,1)}%) IQR[{round(ngenes_bot_0.1_skim$numeric.p25,1)}%,{round(ngenes_bot_0.1_skim$numeric.p75,1)}%] were found in less than 10% of the collected panels.')),
+                         collapse=' ')
+
+# specific examples
+example_phenotypes<-c('hypertrophic cardiomyopathy','autism')
+discrepancy_text<-c(discrepancy_text,glue('To further demonstrate how available panels differ from one another, we compare panels found for {paste0(example_phenotypes,collapse=" and ")}'))
+for (example_pheno in example_phenotypes){
+  discrepancy_text<-c(discrepancy_text,all_text[which(selected_phenotypes==example_pheno)])
+}
+cat(paste0(discrepancy_text,collapse='\n'))
+```
+
+### Panel content evaluation
+
+```{r lit_text,include=T,eval=T}
+comparison_text<-c()
+for (reference_source in c('pubmed','ddb')){
+    for (selected_dist in max_dists){
+      selected_dist<-as.character(selected_dist)
+      f1_comp<-statistical_tests_data[[reference_source]][[selected_dist]]$f1_comp
+      recall_comp<-statistical_tests_data[[reference_source]][[selected_dist]]$recall_comp
+      precision_comp<-statistical_tests_data[[reference_source]][[selected_dist]]$precision_comp
+      n_better_recall_vs_panelapp<-nrow(statistical_tests_data[[reference_source]][[selected_dist]]$better_recall_vs_panelapp)
+      n_better_precision_vs_naive<-nrow(statistical_tests_data[[reference_source]][[selected_dist]]$better_precision_vs_naive)
+        
+      comparison_metrics_summary<-statistical_tests_data[[reference_source]][[selected_dist]]$comparison_metrics%>%
+        group_by(group)%>%select(precision,recall,f1)%>%skimr::skim_without_charts()
+      
+      comparison_metrics_text<-comparison_metrics_summary%>%group_by(group,skim_variable)%>%
+        summarize(metric_text=glue('a mean {skim_variable} of {round(numeric.mean,2)} (IQR[{round(numeric.p25,2)},{round(numeric.p75,2)}])'))
+      
+      #print(comparison_metrics_text)
+      
+      comparison_text<-c(comparison_text,
+                         paste0(glue('Compared to a {reference_source}-based literature search, PanelApp panels demonstrated '),
+                              paste0(comparison_metrics_text%>%filter(group=='panelapp')%>%pull(metric_text), 
+                              collapse=', '),
+                              glue('. The unified panels based on naive search demonstrated '),
+                              paste0(comparison_metrics_text%>%filter(group=='naive search')%>%pull(metric_text), 
+                              collapse=', '),
+                              glue('. Panels generated by the distance-based algorithm, with a distance threshold of {selected_dist}, demonstrated '),
+                              paste0(comparison_metrics_text%>%filter(group=='distance_max_f1')%>%pull(metric_text), 
+                              collapse=', '),
+                              coollapse=' ') )
+  }
+}
+cat(paste0(comparison_text,collapse='\n'))
+```
+
+### Panel comparison
+
+```{r panel_comp,include=T,eval=T}
+comparison_text<-c()
+for (reference_source in c('pubmed','ddb')){
+    for (selected_dist in max_dists){
+      comparison_text<-c(comparison_text,glue('###### {reference_source} - {selected_dist} ######'))
+      comparison_text<-c(comparison_text,glue('The precision and recall of the distance-based generated panels (distance threshold {selected_dist}), based on the {reference_source} literature search, were compared to the PanelApp panels and the naive approach. '))
+      selected_dist<-as.character(selected_dist)
+      f1_comp<-statistical_tests_data[[reference_source]][[selected_dist]]$f1_comp
+      recall_comp<-statistical_tests_data[[reference_source]][[selected_dist]]$recall_comp
+      precision_comp<-statistical_tests_data[[reference_source]][[selected_dist]]$precision_comp
+      n_better_recall_vs_panelapp<-nrow(statistical_tests_data[[reference_source]][[selected_dist]]$better_recall_vs_panelapp)
+      n_better_precision_vs_naive<-nrow(statistical_tests_data[[reference_source]][[selected_dist]]$better_precision_vs_naive)
+      
+      f1_distance_vs_panelapp_max_text<-as.character(report(statistical_tests_data[[reference_source]][[as.character(selected_dist)]][['f1_distance_vs_panelapp_max']]))
+      precision_distance_vs_naive_recall_matched_text<-as.character(report(statistical_tests_data[[reference_source]][[as.character(selected_dist)]][['precision_distance_vs_naive_recall_matched']]))
+      recall_distance_vs_panelapp_precision_matched_text<-as.character(report(statistical_tests_data[[reference_source]][[as.character(selected_dist)]][['recall_distance_vs_panelapp_precision_matched']]))
+      #print(comparison_metrics_text)
+      f1_distance_vs_naive_max_text<-as.character(report(statistical_tests_data[[reference_source]][[as.character(selected_dist)]][['f1_distance_vs_naive_max']]))
+      
+      comparison_text<-c(comparison_text,
+                         paste0(c(
+                              glue('In {nrow(f1_comp%>%filter(distance_max_f1>panelapp))}/{nrow(f1_comp)} ({round(100*nrow(f1_comp%>%filter(distance_max_f1>panelapp))/nrow(f1_comp),1)}%) of the phenotypes, the distance based panel achieved a higher F1 score compared to the PanelApp panel. {f1_distance_vs_panelapp_max_text}'),
+                              glue('In {n_better_recall_vs_panelapp}/{nrow(recall_comp)} ({round(100*n_better_recall_vs_panelapp/nrow(recall_comp),1)}%) of the phenotypes, the distance based panel achieved a higher recall compared to the PanelApp panel while maintaining a comparable precision. {recall_distance_vs_panelapp_precision_matched_text}'),
+                              glue('In {nrow(f1_comp%>%filter(distance_max_f1>`naive search`))}/{nrow(f1_comp)} ({round(100*nrow(f1_comp%>%filter(distance_max_f1>`naive search`))/nrow(f1_comp),1)}%) of the phenotypes, the distance based panel achieved a higher F1 score compared to the naive search panel. {f1_distance_vs_naive_max_text}'),
+                              glue('In {n_better_precision_vs_naive}/{nrow(recall_comp)} ({round(100*n_better_precision_vs_naive/nrow(recall_comp),1)}%) of the phenotypes, the distance based panel achieved a higher precision compared to the naive search panel while maintaining a comparable recall. {precision_distance_vs_naive_recall_matched_text}'),
+                              coollapse='\n') ))
+  }
+}
+
+cat(paste0(comparison_text,collapse='\n'))
+
+# Plot the difference in recall , precision, and f1 per panel
+performance_comp_plot<-
+  statistical_tests_data$pubmed$`0.95`$recall_comp%>%mutate(comp_type='Recall')%>%
+  bind_rows(precision_comp%>%mutate(comp_type='Precision'))%>%
+  bind_rows(f1_comp%>%mutate(comp_type='F1'))%>%
+  select(phenotype_name,comp_type,panelapp,`naive search`,distance_matched_to_panelapp_percision,distance_matched_to_naive_recall,distance_max_f1)%>%
+  pivot_longer(-c(phenotype_name,comp_type))%>%
+  filter((comp_type=='Recall' & name%in%c('panelapp','distance_matched_to_panelapp_percision'))|
+         (comp_type=='Precision' & name%in%c('naive search','distance_matched_to_naive_recall'))|
+         (comp_type=='F1' & name%in%c('naive search','panelapp','distance_max_f1')))%>%
+  mutate(name=forcats::fct_recode(as.factor(name),
+                                  'PanelApp'='panelapp',
+                                  'Naive'='naive search',
+                                  'Distance-based'='distance_matched_to_panelapp_percision',
+                                  'Distance-based'='distance_matched_to_naive_recall',
+                                  'Distance-based'='distance_max_f1'),
+         phenotype_name=stringr::str_to_title(phenotype_name))%>%
+  ggplot(aes(x=phenotype_name,y=value,fill=name))+
+  facet_wrap(comp_type~.)+
+  geom_col(position='dodge',alpha=0.7)+
+  coord_flip()+
+  labs(x=NULL,y=NULL,fill=NULL)+
+  ggsci::scale_fill_jama()+ggsci::scale_color_jama()+
+  theme_minimal()+
+  theme(legend.position = 'bottom',strip.text = element_text(size=10))
+
+performance_comp_plot
+ggsave(performance_comp_plot,file=glue('{results_ouput_folder}/performance_comparison_plot.tiff'),
+       device = 'tiff',
+       width = 8,height = 10,
+       compression = "lzw",dpi=150,bg='white')
+
+```
+
+### Compare vs DISEASES
+
+```{r diseases_comp}
+# Compare F1 in each confidence level
+stat_df<-all_rocs_ddb%>%
+  #filter(confidence_score_thresh==2)%>%
+  group_by(phenotype_name,group,confidence_score_thresh)%>%
+  slice_max(n=1,order_by = f1,with_ties = F)%>%
+  ungroup()%>%
+  select(group,phenotype_name,confidence_score_thresh,f1)%>%
+  pivot_wider(names_from = group,values_from = f1)
+stat_df
+
+ddb_stats<-stat_df%>%group_by(confidence_score_thresh)%>%
+  #summarize(tidy(t.test(ag_0.95,`naive search`,paired = T)))
+  summarize(dist_0.85_vs_panelapp=as.character(report(t.test(ag_0.85,panelapp,paired = T))[1]),
+            dist_0.85_vs_naive=as.character(report(t.test(ag_0.85,`naive search`,paired = T))[1]),
+            dist_0.95_vs_panelapp=as.character(report(t.test(ag_0.95,panelapp,paired = T))[1]),
+            dist_0.95_vs_naive=as.character(report(t.test(ag_0.95,`naive search`,paired = T))[1]),
+            dist_0.99_vs_panelapp=as.character(report(t.test(ag_0.99,panelapp,paired = T))[1]),
+            dist_0.99_vs_naive=as.character(report(t.test(ag_0.99,`naive search`,paired = T))[1]))
+
+
+
+distance_max_f1_vs_pa_naive_over_diseases_confidence<-
+  all_rocs_ddb%>%
+  mutate(group=stringr::str_replace(group,'ag_',''),
+         group=stringr::str_replace(group,'0.95','Distance-based'),
+         group=stringr::str_replace(group,'panelapp','PanelApp'),
+         group=stringr::str_replace(group,'naive search','Naive search'))%>%
+  filter(!(group%in%c(0.85,0.99)))%>%
+  #filter(confidence_score_thresh==2)%>%
+  group_by(phenotype_name,group,confidence_score_thresh)%>%
+  slice_max(n=1,order_by = f1,with_ties = F)%>%
+  ungroup()%>%
+  select(group,confidence_score_thresh,f1)%>%
+  pivot_longer(-c(group,confidence_score_thresh))%>%
+  mutate(confidence_score_thresh=case_when(
+    confidence_score_thresh==1~'Weak',
+    confidence_score_thresh==2~'Mild',
+    confidence_score_thresh==3~'Moderate',
+    confidence_score_thresh==4~'Strong',
+  ),
+  confidence_score_thresh=forcats::fct_relevel(confidence_score_thresh,'Weak','Mild','Moderate','Strong'),
+  name=stringr::str_to_title(name))%>%
+  ggplot(aes(x=name,y=value,fill=group,col=group))+
+  #geom_boxplot(alpha=0.6,col='black')+#coord_flip()+
+  geom_half_boxplot(alpha=0.7,col='black') +
+  geom_half_point(alpha=0.5)+
+  facet_grid(.~confidence_score_thresh)+
+  guides(fill =F,colour= guide_legend(override.aes = list(size=10)))+#coord_flip()+
+  ggsci::scale_fill_jama()+ggsci::scale_color_jama()+
+  theme_minimal()+
+  labs(fill=NULL,color=NULL,y=NULL,x=NULL)+
+  theme(legend.position='top')
+
+distance_max_f1_vs_pa_naive_over_diseases_confidence
+ggsave(distance_max_f1_vs_pa_naive_over_diseases_confidence,file=glue('{results_ouput_folder}/distance_max_f1_vs_pa_naive_over_diseases_confidence.tiff'),
+       device = 'tiff',
+       width = 10,height = 10,
+       compression = "lzw",dpi=150,bg='white')
+
+```
+
+
+# Discussion
+
+### Panel discrepancy
+```{r discussion,include=T,eval=T}
+
+# Panel discrepancy discussion- plot the percent of panels
+percent_of_panels<-NULL
+for (selected_phenotype in selected_phenotypes){
+  phen_percent_of_panels<-selected_phenotypes_analysis[[selected_phenotype]]$relatedness_summary$relatedness$percent_of_panels
+  percent_of_panels<-percent_of_panels%>%
+    bind_rows(data.frame(phenotype_name=selected_phenotype,phen_percent_of_panels))
+}
+cc <- scales::seq_gradient_pal("darkred", "darkblue", "Lab")(seq(0,1,length.out=10))
+percent_of_panels_plot<-
+  percent_of_panels%>%
+  mutate(phenotype_name=stringr::str_to_title(phenotype_name))%>%
+  ggplot(aes(x=percent_of_panels_cat,y=rate,fill=percent_of_panels_cat))+
+  geom_col(alpha=0.7)+
+  facet_wrap(.~phenotype_name)+
+  theme_minimal()+
+  theme(axis.text.x = element_text(angle = 90))+
+  guides(fill=F)+
+  labs(y='Rate of genes',x='Percent of panels with gene')+
+  scale_fill_manual(values=cc)
+percent_of_panels_plot
+ggsave(percent_of_panels_plot,file=glue('{results_ouput_folder}/percent_of_panels_per_phenotype.tiff'),
+       device = 'tiff',
+       width = 10,height = 10,
+       compression = "lzw",dpi=150,bg='white')
+
+# percent of panels compared to panelapp
+pa_percent_of_panels<-NULL
+for (selected_phenotype in selected_phenotypes){
+  phen_percent_of_panels<-selected_phenotypes_analysis[[selected_phenotype]]$relatedness_summary$relatedness$panel_to_compare_percent_of_panels
+  pa_percent_of_panels<-pa_percent_of_panels%>%
+    bind_rows(data.frame(phenotype_name=selected_phenotype,phen_percent_of_panels))
+}
+
+pa_with_all_panels<-percent_of_panels%>%
+  left_join(percent_of_panels%>%group_by(phenotype_name)%>%summarize(total_genes=sum(n)))%>%
+  left_join(pa_percent_of_panels%>%rename(pa_genes=n)%>%
+              select(phenotype_name,percent_of_panels_cat,pa_genes))%>%
+  mutate(non_pa_genes=n-pa_genes,
+         `In PanelApp`=pa_genes/total_genes,
+         `Not in PanelApp`=non_pa_genes/total_genes)%>%# reduce the panelapp genes from the total number of genes
+  select(phenotype_name,percent_of_panels_cat,`In PanelApp`,`Not in PanelApp`)%>%
+  pivot_longer(-c(phenotype_name,percent_of_panels_cat))
+
+pa_percent_of_panels_vs_panelapp_plot<-
+  pa_with_all_panels%>%
+  mutate(phenotype_name=stringr::str_to_title(phenotype_name))%>%
+  ggplot(aes(x=percent_of_panels_cat,y=value,fill=name))+
+  geom_col(alpha=0.5)+
+  facet_wrap(.~phenotype_name)+
+  theme_minimal()+
+  theme(axis.text.x = element_text(angle = 90),legend.position = 'bottom')+
+  labs(y='Rate of genes',x='Percent of panels with gene',fill=NULL)+
+  ggsci::scale_fill_lancet()+
+  guides()
+pa_percent_of_panels_vs_panelapp_plot
+
+ggsave(pa_percent_of_panels_vs_panelapp_plot,file=glue('{results_ouput_folder}/percent_of_panels_per_phenotype_vs_panelapp.tiff'),
+       device = 'tiff',
+       width = 10,height = 10,
+       compression = "lzw",dpi=150,bg='white')
+
+# Panelapp genes vs number of panels
+panels_per_pa_gene<-NULL
+for (selected_phenotype in selected_phenotypes){
+  pa_genes<-selected_phenotypes_analysis[[selected_phenotype]]$relatedness_summary$relatedness$panel_to_compare_genes
+  pa_genes_num_of_panels<-
+    selected_phenotypes_analysis[[selected_phenotype]]$relatedness_summary$relatedness$panels_per_gene%>%
+    mutate(in_panelapp=ifelse(gene_symbol%in%pa_genes,1,0))
+  panels_per_pa_gene<-panels_per_pa_gene%>%
+    bind_rows(data.frame(phenotype_name=selected_phenotype,pa_genes_num_of_panels))
+}
+report(glm(in_panelapp~npanels_rate,data=panels_per_pa_gene,family='binomial'))
+```
+
+## Panel comparison
+
+```{r distance_vs_rest_comparison,include=T,eval=T}
+# Boxplot performance comparison
+max_f1_performance_comparison<-all_rocs_pubmed%>%
+  mutate(group=stringr::str_replace(group,'ag_0.95','Distance-based'),
+         group=stringr::str_replace(group,'panelapp','PanelApp'),
+         group=stringr::str_replace(group,'naive search','Naive search'))%>%
+  filter(max_dist==0.95 | is.na(max_dist))%>%
+  group_by(phenotype_name,group)%>%
+  slice_max(n=1,order_by = f1,with_ties = F)%>%
+  ungroup()%>%
+  select(group,f1,precision,recall)%>%
+  pivot_longer(-c(group))%>%
+  mutate(name=stringr::str_to_title(name))%>%
+  ggplot(aes(x=group,y=value,fill=group,col=group))+
+  #geom_boxplot(alpha=0.7)+#coord_flip()+
+  geom_half_boxplot(alpha=0.7,col='black') +
+  geom_half_point(alpha=0.5)+
+  facet_wrap(name~.)+
+  guides(fill=F,colour = guide_legend(override.aes = list(size=10)))+#coord_flip()+
+  ggsci::scale_fill_jama()+ggsci::scale_color_jama()+
+  theme_minimal()+
+  labs(fill=NULL,color=NULL,y=NULL,x=NULL)+
+  theme(legend.position='top',axis.text.x = element_blank())
+
+ggsave(max_f1_performance_comparison,file=glue('{results_ouput_folder}/max_f1_performance_comparison.tiff'),
+       device = 'tiff',
+       width = 6,height = 6,
+       compression = "lzw",dpi=150,bg='white')
+
+# PR curves plot - for pubmed - for selected distance
+pr_curves_plot<-
+  all_rocs_pubmed%>%
+  filter(group%in%c('ag_0.95'))%>%
+  filter(!((.threshold==Inf) | (.threshold==0))) %>%
+  mutate(phenotype_name=stringr::str_to_title(phenotype_name))%>%
+  ggplot(aes(x=recall,y=precision,col=factor(group)))+
+  geom_line(color=ggsci::pal_nejm()(2)[2])+facet_wrap(phenotype_name~.)+
+  geom_abline(slope = -1,intercept = 1,linetype=2,alpha=0.5)+
+  geom_point(data=panelapp_roc_pubmed%>%
+               mutate(phenotype_name=stringr::str_to_title(phenotype_name)),
+             inherit.aes = F,aes(x=recall,y=precision))+
+  geom_point(data=naive_roc_pubmed%>%
+               mutate(phenotype_name=stringr::str_to_title(phenotype_name)),
+             inherit.aes = F,aes(x=recall,y=precision),shape=17,size=2)+
+  theme_minimal()+
+  #scale_color_nejm()+
+  labs(x='Recall',y='Precision')+
+  guides(color=F)+
+  theme(legend.position = 'top',legend.text = element_text(size=12))
+pr_curves_plot
+
+ggsave(pr_curves_plot,file=glue('{results_ouput_folder}/pr_curves_plots_vs_pa_and_naive.tiff'),
+       device = 'tiff',
+       width = 10,height = 10,
+       compression = "lzw",dpi=150,bg='white')
+
+pr_curves_plot_dists<-
+  all_rocs_pubmed%>%
+  #filter(group%in%c('ag_0.95'))%>%
+  filter(!((.threshold==Inf) | (.threshold==0))) %>%
+  mutate(phenotype_name=stringr::str_to_title(phenotype_name),
+         group=stringr::str_replace(group,'ag_',''))%>%
+  ggplot(aes(x=recall,y=precision,col=factor(group)))+
+  geom_line()+facet_wrap(phenotype_name~.)+
+  geom_abline(slope = -1,intercept = 1,linetype=2,alpha=0.5)+
+  theme_minimal()+
+  scale_color_nejm()+
+  labs(x='Recall',y='Precision',color='Max Panel Distance')+
+  #guides(color=F)+
+  theme(legend.position = 'bottom',legend.text = element_text(size=12))
+pr_curves_plot_dists
+
+ggsave(pr_curves_plot,file=glue('{results_ouput_folder}/pr_curves_plots_dists.tiff'),
+       device = 'tiff',
+       width = 8,height = 10,
+       compression = "lzw",dpi=150,bg='white')
+```
