@@ -7,7 +7,10 @@ output: html_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE,include=F,eval=F,message = F,warning=F)
-results_ouput_folder<-'/media/SSD/Bioinformatics/Projects/gene_panel_generator_202108/panel_comparison_project/output/panel_comparison_analysis_2022-07-21/'
+results_ouput_folder<-'/media/SSD/Bioinformatics/Projects/gene_panel_generator_202108/panel_comparison_project/output/panel_comparison_analysis_2022-07-22/'
+output_date<-stringr::str_extract(results_ouput_folder,'\\d+-\\d+-\\d+')
+figures_folder<-glue('{results_ouput_folder}/figures_{output_date}')
+
 
 library(glue)
 library(tidyverse)
@@ -22,6 +25,8 @@ load(glue('{results_ouput_folder}/workspace.RData'))
 library(rmarkdown)
 output_dir <- results_ouput_folder
 render('/media/SSD/Bioinformatics/Projects/gene_panel_generator_202108/panel_comparison_project/src/panel_comparison_results.Rmd', output_dir = output_dir,output_file = sprintf('panel_comparison_results.%s.html',Sys.Date()),quiet = F)
+
+if (!dir.exists(figures_folder))){dir.create(figures_folder)}
 ```
 
 # Results
@@ -136,8 +141,8 @@ cat(paste0(comparison_text,collapse='\n'))
 # Plot the difference in recall , precision, and f1 per panel
 performance_comp_plot<-
   statistical_tests_data$pubmed$`0.95`$recall_comp%>%mutate(comp_type='Recall')%>%
-  bind_rows(precision_comp%>%mutate(comp_type='Precision'))%>%
-  bind_rows(f1_comp%>%mutate(comp_type='F1'))%>%
+  bind_rows(statistical_tests_data$pubmed$`0.95`$precision_comp%>%mutate(comp_type='Precision'))%>%
+  bind_rows(statistical_tests_data$pubmed$`0.95`$f1_comp%>%mutate(comp_type='F1'))%>%
   select(phenotype_name,comp_type,panelapp,`naive search`,distance_matched_to_panelapp_percision,distance_matched_to_naive_recall,distance_max_f1)%>%
   pivot_longer(-c(phenotype_name,comp_type))%>%
   filter((comp_type=='Recall' & name%in%c('panelapp','distance_matched_to_panelapp_percision'))|
@@ -160,7 +165,7 @@ performance_comp_plot<-
   theme(legend.position = 'bottom',strip.text = element_text(size=10))
 
 performance_comp_plot
-ggsave(performance_comp_plot,file=glue('{results_ouput_folder}/performance_comparison_plot.tiff'),
+ggsave(performance_comp_plot,file=glue('{figures_folder}/performance_comparison_plot.tiff'),
        device = 'tiff',
        width = 8,height = 10,
        compression = "lzw",dpi=150,bg='white')
@@ -189,8 +194,24 @@ ddb_stats<-stat_df%>%group_by(confidence_score_thresh)%>%
             dist_0.99_vs_panelapp=as.character(report(t.test(ag_0.99,panelapp,paired = T))[1]),
             dist_0.99_vs_naive=as.character(report(t.test(ag_0.99,`naive search`,paired = T))[1]))
 
+ddb_stats<-stat_df%>%group_by(confidence_score_thresh)%>%
+  #summarize(tidy(t.test(ag_0.95,`naive search`,paired = T)))
+  summarize(dist_0.85_vs_panelapp=tidy(t.test(ag_0.85,panelapp,paired = T)),
+            dist_0.85_vs_naive=tidy(t.test(ag_0.85,`naive search`,paired = T)),
+            dist_0.95_vs_panelapp=tidy(t.test(ag_0.95,panelapp,paired = T)),
+            dist_0.95_vs_naive=tidy(t.test(ag_0.95,`naive search`,paired = T)),
+            dist_0.99_vs_panelapp=tidy(t.test(ag_0.99,panelapp,paired = T)),
+            dist_0.99_vs_naive=tidy(t.test(ag_0.99,`naive search`,paired = T)))
 
 
+# the text
+comps<-setdiff(colnames(ddb_stats),'confidence_score_thresh')
+for (comp in comps){
+  cat(glue('comparing {comp} with confidence score thresh {c(1:4)}, difference in F1 score was (difference = {round(ddb_stats[[comp]]$estimate,2)}, 95% CI [{round(ddb_stats[[comp]]$conf.low,2)}, {round(ddb_stats[[comp]]$conf.high,2)}]) (p={ddb_stats[[comp]]$p.value})'))
+}
+
+library(ggpubr)
+my_comparisons <- list( c("Distance-based", "Naive search"), c("Distance-based", "PanelApp") )
 distance_max_f1_vs_pa_naive_over_diseases_confidence<-
   all_rocs_ddb%>%
   mutate(group=stringr::str_replace(group,'ag_',''),
@@ -212,7 +233,7 @@ distance_max_f1_vs_pa_naive_over_diseases_confidence<-
   ),
   confidence_score_thresh=forcats::fct_relevel(confidence_score_thresh,'Weak','Mild','Moderate','Strong'),
   name=stringr::str_to_title(name))%>%
-  ggplot(aes(x=name,y=value,fill=group,col=group))+
+  ggplot(aes(x=group,y=value,fill=group,col=group))+
   #geom_boxplot(alpha=0.6,col='black')+#coord_flip()+
   geom_half_boxplot(alpha=0.7,col='black') +
   geom_half_point(alpha=0.5)+
@@ -220,14 +241,16 @@ distance_max_f1_vs_pa_naive_over_diseases_confidence<-
   guides(fill =F,colour= guide_legend(override.aes = list(size=10)))+#coord_flip()+
   ggsci::scale_fill_jama()+ggsci::scale_color_jama()+
   theme_minimal()+
-  labs(fill=NULL,color=NULL,y=NULL,x=NULL)+
-  theme(legend.position='top')
+  labs(fill=NULL,color=NULL,y='F1-score',x=NULL)+
+  theme(legend.position='top',axis.text.x = element_blank())+
+  stat_compare_means(comparisons = my_comparisons,method = 't.test',paired = T)
 
 distance_max_f1_vs_pa_naive_over_diseases_confidence
-ggsave(distance_max_f1_vs_pa_naive_over_diseases_confidence,file=glue('{results_ouput_folder}/distance_max_f1_vs_pa_naive_over_diseases_confidence.tiff'),
+ggsave(distance_max_f1_vs_pa_naive_over_diseases_confidence,file=glue('{figures_folder}/distance_max_f1_vs_pa_naive_over_diseases_confidence.tiff'),
        device = 'tiff',
        width = 10,height = 10,
        compression = "lzw",dpi=150,bg='white')
+  
 
 ```
 
@@ -257,7 +280,7 @@ percent_of_panels_plot<-
   labs(y='Rate of genes',x='Percent of panels with gene')+
   scale_fill_manual(values=cc)
 percent_of_panels_plot
-ggsave(percent_of_panels_plot,file=glue('{results_ouput_folder}/percent_of_panels_per_phenotype.tiff'),
+ggsave(percent_of_panels_plot,file=glue('{figures_folder}/percent_of_panels_per_phenotype.tiff'),
        device = 'tiff',
        width = 10,height = 10,
        compression = "lzw",dpi=150,bg='white')
@@ -293,7 +316,7 @@ pa_percent_of_panels_vs_panelapp_plot<-
   guides()
 pa_percent_of_panels_vs_panelapp_plot
 
-ggsave(pa_percent_of_panels_vs_panelapp_plot,file=glue('{results_ouput_folder}/percent_of_panels_per_phenotype_vs_panelapp.tiff'),
+ggsave(pa_percent_of_panels_vs_panelapp_plot,file=glue('{figures_folder}/percent_of_panels_per_phenotype_vs_panelapp.tiff'),
        device = 'tiff',
        width = 10,height = 10,
        compression = "lzw",dpi=150,bg='white')
@@ -337,7 +360,7 @@ max_f1_performance_comparison<-all_rocs_pubmed%>%
   labs(fill=NULL,color=NULL,y=NULL,x=NULL)+
   theme(legend.position='top',axis.text.x = element_blank())
 
-ggsave(max_f1_performance_comparison,file=glue('{results_ouput_folder}/max_f1_performance_comparison.tiff'),
+ggsave(max_f1_performance_comparison,file=glue('{figures_folder}/max_f1_performance_comparison.tiff'),
        device = 'tiff',
        width = 6,height = 6,
        compression = "lzw",dpi=150,bg='white')
@@ -364,7 +387,7 @@ pr_curves_plot<-
   theme(legend.position = 'top',legend.text = element_text(size=12))
 pr_curves_plot
 
-ggsave(pr_curves_plot,file=glue('{results_ouput_folder}/pr_curves_plots_vs_pa_and_naive.tiff'),
+ggsave(pr_curves_plot,file=glue('{figures_folder}/pr_curves_plots_vs_pa_and_naive.tiff'),
        device = 'tiff',
        width = 10,height = 10,
        compression = "lzw",dpi=150,bg='white')
@@ -385,7 +408,7 @@ pr_curves_plot_dists<-
   theme(legend.position = 'bottom',legend.text = element_text(size=12))
 pr_curves_plot_dists
 
-ggsave(pr_curves_plot,file=glue('{results_ouput_folder}/pr_curves_plots_dists.tiff'),
+ggsave(pr_curves_plot,file=glue('{figures_folder}/pr_curves_plots_dists.tiff'),
        device = 'tiff',
        width = 8,height = 10,
        compression = "lzw",dpi=150,bg='white')

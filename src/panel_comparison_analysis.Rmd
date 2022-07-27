@@ -15,28 +15,27 @@ output:
 }
 </style>
 
-# TODO
-- there is a basic problem with the (at least the panelapp panels) in which the panels have duplicate genes in them.. need to understand why
 
-
-```{r render_report,eval=F,echo=F}
-library(rmarkdown)
-output_dir <- "/media/SSD/Bioinformatics/Projects/gene_panel_generator_202108/gene_panel_generator_project/output/reports"
-render('/media/SSD/Bioinformatics/Projects/gene_panel_generator_202108/gene_panel_generator_project/src/prepare_gene_panel_data.Rmd', output_dir = output_dir,output_file = sprintf('gene_panel_prep_report.%s.html',Sys.Date()),quiet = F)
-```
-
-```{r setup, include=FALSE}
-project_dir<-'/media/SSD/Bioinformatics/Projects/gene_panel_generator_202108/panel_comparison_project/'
-knitr::opts_knit$set(root.dir='/media/SSD/Bioinformatics/Projects/gene_panel_generator_202108/panel_comparison_project/')
-knitr::opts_chunk$set(echo = F,include=F,eval=F)
-library(ProjectTemplate)
-setwd(project_dir)
-load.project()
-
+```{r analysis_setup,include=T,eval=T}
+library(glue)
 analysis_name<-glue('panel_comparison_analysis_{Sys.Date()}')
 analysis_dir<-glue('output/{analysis_name}')
 if (!dir.exists(analysis_dir)){dir.create(analysis_dir)}
+```
 
+```{r render_report,eval=F,echo=F}
+library(rmarkdown)
+output_dir <- "/media/SSD/Bioinformatics/Projects/gene_panel_generator_202108/panel_comparison_project/output/"
+render('/media/SSD/Bioinformatics/Projects/gene_panel_generator_202108/panel_comparison_project/src/panel_comparison_analysis.Rmd', output_dir = output_dir,output_file = sprintf('panel_comparison_analysis.%s.html',Sys.Date()),quiet = F)
+```
+
+```{r setup, include=T,eval=T}
+project_dir<-'/media/SSD/Bioinformatics/Projects/gene_panel_generator_202108/panel_comparison_project/'
+knitr::opts_knit$set(root.dir='/media/SSD/Bioinformatics/Projects/gene_panel_generator_202108/panel_comparison_project/')
+knitr::opts_chunk$set(echo = T,include=F,eval=F,message=F,warning=F)
+library(ProjectTemplate)
+setwd(project_dir)
+load.project()
 ```
 
 
@@ -57,13 +56,15 @@ gtr_panels_list<-gtr_panels_list%>%filter(lab_test_id %in% gtr_db$panel_id)
 
 # define the minimal number of publications required to define gene-disease association
 min_num_of_pub_to_consider_positive<-2
+# define the score to use for the auto generator
+ag_score<-'scaled_gene_score'
 ```
 
 Distance between panels was calculated using the Jaccard method. 
 
 # Create a binary matrix of the manually selected gene panels
 
-```{r gtr_binarize_and_calculate_distance,include=T,eval=T}
+```{r gtr_binarize_and_calculate_distance_X,include=T,eval=T}
 # binary_panel_gene_table<-create_binary_gene_table(fixed_source_db)
 # # filter out the hpo data
 # binary_panel_gene_table_no_hpo<-binary_panel_gene_table%>%filter(!grepl('hpo',row.names(binary_panel_gene_table)))
@@ -531,7 +532,7 @@ autopanel_scores%>%
 
 # ROC analysis - vs pubmed
 
-```{r roc_analysis,include=T,eval=T}
+```{r roc_analysis_pubmed,include=T,eval=T}
 
 # now add whether the gene is positive or not
 auto_generator_rocs_pubmed<-NULL
@@ -756,21 +757,49 @@ to_plot%>%
 
 ```
 
+# Categorizing gene-score
+
+```{r score_cat}
+ag_panels<-auto_generator_panelapp_only$`max_dist=0.95`
+# flatten the panels
+ag_panels<-ag_panels%>%listr::list_name_to_df()%>%listr::list_bind_all()
+# join with has pub
+all_genes_has_pub<-NULL
+for (selected_phenotype in selected_phenotypes){
+  all_genes_vs_phenotype<-pubmed_gene_list_vs_phenotype(phenotype_name = selected_phenotype,
+                                                            gene_list = all_genes,
+                                                            pre_generated_genes_pubs = entrez_pubmed_res)
+  all_genes_vs_phenotype<-all_genes_vs_phenotype%>%
+    mutate(has_pub=factor(ifelse(pub_num>=min_num_of_pub_to_consider_positive,1,0)))
+  all_genes_has_pub<-all_genes_has_pub%>%
+    bind_rows(data.frame(all_genes_vs_phenotype%>%select(-pubmed_ids),
+                         .group=selected_phenotype))
+}
+
+# now join them
+genes_with_score_and_pub<-all_genes_has_pub%>%
+  left_join(ag_panels%>%select(gene_symbol,.group,scaled_gene_score,rank_percentile))%>%
+  mutate(scaled_gene_score=ifelse(is.na(scaled_gene_score),0,scaled_gene_score),
+         rank_percentile=ifelse(is.na(rank_percentile),0,rank_percentile))
+
+genes_with_score_and_pub%>%
+  filter(rank_percentile!=0)%>%
+  ggplot(aes(x=rank_percentile,fill=has_pub))+
+  geom_histogram(position='dodge')+facet_wrap(.group~.,scales='free_y')
+
+```
+
 # Statistical analysis
 
-```{r ag_vs_pa_vs_ns}
+```{r ag_vs_pa_vs_ns,include=T,eval=T}
 
 
 statistical_tests_data<-list()
-for (reference_source in c('pubmed','ddb')){
+for (reference_source in c('pubmed')){# cannot use this part in the ddb comparison, because the results are divided per confidence thresh, need to create another list just for it
   if (reference_source=='pubmed'){
     auto_generator_rocs<-auto_generator_rocs_pubmed
     panelapp_roc<-panelapp_roc_pubmed
     naive_roc<-naive_roc_pubmed
-  }else{
-    auto_generator_rocs<-auto_generator_rocs_ddb
-    panelapp_roc<-panelapp_roc_ddb
-    naive_roc<-naive_roc_ddb
   }
   statistical_tests_data[[reference_source]]<-list()
   for (selected_dist in max_dists){
@@ -927,7 +956,7 @@ for (reference_source in c('pubmed','ddb')){
 
 # Save results
 
-```{r save_results}
+```{r save_results,include=T,eval=T}
 elements_size<-data.frame(size=sort( sapply(ls(),function(x){object.size(get(x))})))
 elements_to_save<-elements_size%>%filter(size<20000000)%>%row.names()
 save(list=elements_to_save,file=glue('{analysis_dir}/workspace.RData'))
@@ -1139,7 +1168,7 @@ to_plot%>%
 ```
 
 
-```{r check_dist_distribution_for_panelapp_panels}
+```{r check_dist_distribution_for_panelapp_panels_1}
 panelapp_panels_dist<-gtr_dm_df%>%filter(grepl('panelapp',row))%>%group_by(row)%>%
   filter(col!=row)%>%
   summarize(mean_dist=mean(value),
