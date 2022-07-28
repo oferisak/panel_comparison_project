@@ -34,15 +34,15 @@ generate_panel_from_panels<-function(joined_panel_names,gen_source_db,gen_dm_df,
               min_panel_dist=min(panel_dist),
               max_panel_dist=max(panel_dist),
               median_panel_dist=median(panel_dist),
-              mean_panel_dist=mean(panel_dist))%>%
-    mutate(rank=rank(gene_score,tie='max'))
+              mean_panel_dist=mean(panel_dist))
   
   genes_in_original_panels<-gen_source_db%>%filter(panel_joined_name%in%joined_panel_names)%>%pull(gene_symbol)%>%unique()
   gene_rank$in_original_panels<-ifelse(gene_rank$gene_symbol %in% genes_in_original_panels,1,0)
   
   # if the gene is in the original panel and the original_panel_max_score flag is T change its score to be the max score
   gene_rank<-gene_rank%>%
-    mutate(gene_score=ifelse(original_panel_max_score & in_original_panels,max(gene_score),gene_score))
+    mutate(gene_score=ifelse(original_panel_max_score & in_original_panels,max(gene_score),gene_score),
+           rank=rank(gene_score,tie='max'))
   
   # now adjust for number of panels per gene
   gene_rank<-gene_rank%>%left_join(panels_per_gene)%>%

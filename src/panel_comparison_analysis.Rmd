@@ -57,7 +57,7 @@ gtr_panels_list<-gtr_panels_list%>%filter(lab_test_id %in% gtr_db$panel_id)
 # define the minimal number of publications required to define gene-disease association
 min_num_of_pub_to_consider_positive<-2
 # define the score to use for the auto generator
-ag_score<-'scaled_gene_score'
+
 ```
 
 Distance between panels was calculated using the Jaccard method. 
@@ -477,7 +477,8 @@ diseases_db%>%filter(gene_symbol=='APCDD1')
 ```{r generate auto panels,include=T,eval=T}
 auto_generator_panelapp_only<-list()
 auto_generator_panelapp_with_similar<-list()
-max_dists=c(0.85,0.95,0.99)
+#max_dists=c(0.85,0.95,0.99)
+max_dists=c(0.95)
 for (max_dist in max_dists){
   auto_generator_panelapp_only[[glue('max_dist={max_dist}')]]<-list()
   for (selected_phenotype_name in selected_phenotypes_df$phenotype_name){
@@ -520,8 +521,8 @@ for (selected_phenotype in selected_phenotypes){
 }
 
 autopanel_scores%>%
-  filter(max_dist==0.85)%>%
-  select(phenotype_name,has_pub,num_o_panels,scaled_gene_score)%>%
+  #filter(max_dist==0.85)%>%
+  select(phenotype_name,has_pub,num_o_panels,ag_score)%>%
   pivot_longer(-c(phenotype_name,has_pub))%>%
   ggplot(aes(x=value,fill=has_pub))+
     geom_histogram(position='dodge')+
@@ -533,7 +534,8 @@ autopanel_scores%>%
 # ROC analysis - vs pubmed
 
 ```{r roc_analysis_pubmed,include=T,eval=T}
-
+#ag_score<-'rank_percentile'
+ag_score<-'scaled_gene_score'
 # now add whether the gene is positive or not
 auto_generator_rocs_pubmed<-NULL
 panelapp_roc_pubmed<-NULL
@@ -556,7 +558,7 @@ for (selected_phenotype_name in selected_phenotypes_df$phenotype_name){
                                                 auto_generator_panel_res = auto_generator_panel_res,
                                                 all_genes_vs_phenotype = all_genes_vs_phenotype,
                                                 gen_source_db = gtr_with_expert_db,
-                                                score_column = 'scaled_gene_score')
+                                                score_column = ag_score)
     auto_generator_rocs_pubmed<-auto_generator_rocs_pubmed%>%
       bind_rows(data.frame(phenotype_auto_generator_pr_curve,max_dist=max_dist)%>%
                   mutate(group=glue('ag_{max_dist}')))
@@ -673,7 +675,7 @@ for (confidence_score_thresh in confidence_score_threshs){
                                                   auto_generator_panel_res = auto_generator_panel_res,
                                                   all_genes_vs_phenotype = all_genes_vs_phenotype,
                                                   gen_source_db = gtr_with_expert_db,
-                                                  score_column = 'scaled_gene_score')
+                                                  score_column = ag_score)
       auto_generator_rocs_ddb<-auto_generator_rocs_ddb%>%
         bind_rows(data.frame(phenotype_auto_generator_pr_curve,max_dist=max_dist)%>%
                     mutate(group=glue('ag_{max_dist}')))# MIND THAT IF THE AUTO GENERATOR ROC IS FOR MORE THAN ONE SCORE (INCLUDES THE MODIFIED) YOU NEED TO GIVE EACH SCORE A DIFFERENT GROUP NAME
@@ -771,21 +773,45 @@ for (selected_phenotype in selected_phenotypes){
                                                             pre_generated_genes_pubs = entrez_pubmed_res)
   all_genes_vs_phenotype<-all_genes_vs_phenotype%>%
     mutate(has_pub=factor(ifelse(pub_num>=min_num_of_pub_to_consider_positive,1,0)))
+  
   all_genes_has_pub<-all_genes_has_pub%>%
     bind_rows(data.frame(all_genes_vs_phenotype%>%select(-pubmed_ids),
-                         .group=selected_phenotype))
+                         .group=selected_phenotype)%>%
+                left_join(data.frame(ddb_vs_phenotype[[selected_phenotype]]%>%
+                                       select(gene_symbol,confidence_score),
+                                     .group=selected_phenotype)))
+  
+  # all_genes_has_pub<-all_genes_has_pub%>%
+  #     left_join(data.frame(ddb_vs_phenotype[[selected_phenotype]]%>%select(gene_symbol,confidence_score),
+  #                          .group=selected_phenotype))
 }
 
 # now join them
 genes_with_score_and_pub<-all_genes_has_pub%>%
-  left_join(ag_panels%>%select(gene_symbol,.group,scaled_gene_score,rank_percentile))%>%
+  left_join(ag_panels%>%select(gene_symbol,.group,in_original_panels,scaled_gene_score,rank_percentile))%>%
   mutate(scaled_gene_score=ifelse(is.na(scaled_gene_score),0,scaled_gene_score),
-         rank_percentile=ifelse(is.na(rank_percentile),0,rank_percentile))
+         confidence_score=ifelse(is.na(confidence_score),0,confidence_score),
+         rank_percentile=ifelse(is.na(rank_percentile),0,rank_percentile),
+         rank_percentile_cat=as.character(cut(rank_percentile,breaks=c(0,0.5,0.8,0.9,1),labels=c('Not likely','Mild','Medium','High'))),
+         rank_percentile_cat=ifelse(is.na(rank_percentile_cat),'Not likely',rank_percentile_cat))
+
+a<-genes_with_score_and_pub%>%
+  group_by(.group,rank_percentile_cat)%>%
+  summarize(n=n(),
+            in_panelapp=sum(as.numeric(as.character(in_original_panels))),
+            has_pub=mean(as.numeric(as.character(has_pub))),
+            confidence_score=median(confidence_score))
+a
 
 genes_with_score_and_pub%>%
   filter(rank_percentile!=0)%>%
-  ggplot(aes(x=rank_percentile,fill=has_pub))+
-  geom_histogram(position='dodge')+facet_wrap(.group~.,scales='free_y')
+  ggplot(aes(x=rank_percentile_cat,y=confidence_score,col=has_pub))+
+  geom_boxplot()#+facet_wrap(.group~.,scales='free')
+
+genes_with_score_and_pub%>%
+  filter(rank_percentile!=0)%>%
+  ggplot(aes(x=rank_percentile_cat,fill=has_pub))+
+  geom_bar()+facet_wrap(.group~.,scales='free')
 
 ```
 
@@ -810,7 +836,7 @@ for (reference_source in c('pubmed')){# cannot use this part in the ddb comparis
     # add number of genes
     library(listr)
     auto_panels_genes<-auto_generator_panelapp_only[[glue('max_dist={selected_dist}')]] %>%list_name_to_df()%>%list_bind(selected_phenotypes)
-    auto_panels_genes<-auto_panels_genes[[1]]%>%select(phenotype_name=.group,gene_symbol,scaled_gene_score)
+    auto_panels_genes<-auto_panels_genes[[1]]%>%select(phenotype_name=.group,gene_symbol,ag_score)
     
     # for each threshold calculate the number of genes
     number_of_genes_above_thresh<-list()
